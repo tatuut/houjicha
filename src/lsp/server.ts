@@ -505,7 +505,7 @@ connection.onCompletion((params: TextDocumentPositionParams): CompletionItem[] =
                 },
                 sortText: `${isWritten ? '1' : '0'}-${String(sortOrder).padStart(2, '0')}`,
                 filterText: '(' + reqName,
-                // (は既に入力済みなので、それ以降を挿入
+                // (は既に入力済み、)は補完に含める
                 insertText: annotation.解釈?.[0]?.規範
                   ? `${reqName}): %${annotation.解釈[0].規範} <= `
                   : `${reqName}) <= `,
