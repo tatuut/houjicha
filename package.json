@@ -1,54 +1,38 @@
 {
-  "name": "matcha-lsp",
-  "displayName": "本件 Matcha - Legal Reasoning Language",
-  "description": "法的推論のための形式言語「本件 Matcha」のLanguage Server Protocol実装",
+  "name": "houjicha-lsp",
+  "displayName": "ほうじ茶 - 法的推論言語",
+  "description": "法的推論のための形式言語「ほうじ茶」のLanguage Server Protocol実装",
   "version": "0.1.0",
-  "publisher": "matcha-lang",
+  "publisher": "houjicha-lang",
   "engines": {
     "vscode": "^1.75.0"
   },
   "categories": [
     "Programming Languages"
   ],
-  "activationEvents": [
-    "onLanguage:matcha"
-  ],
   "main": "./dist/vscode-extension/extension.js",
   "contributes": {
     "languages": [
       {
-        "id": "matcha",
+        "id": "houjicha",
         "aliases": [
-          "Matcha",
-          "本件Matcha"
+          "Houjicha",
+          "ほうじ茶"
         ],
         "extensions": [
-          ".matcha",
-          ".mcha"
+          ".houjicha",
+          ".hcha"
         ],
         "configuration": "./language-configuration.json"
       }
     ],
     "grammars": [
       {
-        "language": "matcha",
-        "scopeName": "source.matcha",
-        "path": "./syntaxes/matcha.tmLanguage.json"
+        "language": "houjicha",
+        "scopeName": "source.houjicha",
+        "path": "./syntaxes/houjicha.tmLanguage.json"
       }
-    ],
-    "configurationDefaults": {
-      "[matcha]": {
-        "editor.wordBasedSuggestions": "off",
-        "editor.suggest.showWords": false,
-        "editor.quickSuggestions": {
-          "other": true,
-          "comments": false,
-          "strings": true
-        },
-        "editor.suggestSelection": "first",
-        "editor.acceptSuggestionOnEnter": "on"
-      }
-    }
+    ]
   },
   "scripts": {
     "build": "tsc",

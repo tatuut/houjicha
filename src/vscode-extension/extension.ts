@@ -1,5 +1,5 @@
 /**
- * 本件 Matcha - VS Code 拡張機能
+ * ほうじ茶（Houjicha）- VS Code 拡張機能
  * Language Server クライアント
  */
 
@@ -38,18 +38,18 @@ export function activate(context: ExtensionContext) {
   // クライアントオプション
   const clientOptions: LanguageClientOptions = {
     documentSelector: [
-      { scheme: 'file', language: 'matcha' },
-      { scheme: 'untitled', language: 'matcha' },
+      { scheme: 'file', language: 'houjicha' },
+      { scheme: 'untitled', language: 'houjicha' },
     ],
     synchronize: {
-      fileEvents: workspace.createFileSystemWatcher('**/*.{matcha,mcha}'),
+      fileEvents: workspace.createFileSystemWatcher('**/*.{houjicha,hcha}'),
     },
   };
 
   // クライアントを作成して起動
   client = new LanguageClient(
-    'matchaLanguageServer',
-    '本件 Matcha Language Server',
+    'houjichaLanguageServer',
+    'ほうじ茶 Language Server',
     serverOptions,
     clientOptions
   );

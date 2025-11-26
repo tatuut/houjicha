@@ -1,5 +1,5 @@
 /**
- * 本件 Matcha - 字句解析器（Lexer）
+ * ほうじ茶（Houjicha）- 字句解析器（Lexer）
  * 日本語IME対応のため、全角記号も認識する
  */
 
@@ -17,8 +17,9 @@ export enum TokenType {
   QUESTION = 'QUESTION',             // ? 論点
   PERCENT = 'PERCENT',               // % 規範
   AT = 'AT',                         // @ 評価
-  TILDE_ARROW = 'TILDE_ARROW',       // ~> 理由
+  TILDE_ARROW = 'TILDE_ARROW',       // ~> 理由（論点内）
   IMPLIES = 'IMPLIES',               // => 帰結
+  SEMICOLON = 'SEMICOLON',           // ; 理由（独立行）
 
   // 論理演算子
   AND = 'AND',                       // & または ＆
@@ -231,6 +232,11 @@ export class Lexer {
         this.addToken(TokenType.AT, char, startPos);
         break;
 
+      case ';':
+      case '；':
+        this.addToken(TokenType.SEMICOLON, char, startPos);
+        break;
+
       case '~':
         if (this.peek() === '>') {
           this.advance();
@@ -390,7 +396,7 @@ export class Lexer {
       '#', '＃', '^', ':', '：', '<', '>', '?', '？',
       '%', '％', '@', '＠', '~', '=', '&', '＆', '|', '｜',
       '+', '＋', '!', '！', '(', '（', ')', '）',
-      '「', '」', '$', '＄', '/', '\\',
+      '「', '」', '$', '＄', '/', '\\', ';', '；',
       ' ', '\t', '\u3000'
     ];
     return specialChars.includes(char);

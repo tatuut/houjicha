@@ -1,13 +1,14 @@
 {
   "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
-  "name": "Matcha",
-  "scopeName": "source.matcha",
+  "name": "Houjicha",
+  "scopeName": "source.houjicha",
   "patterns": [
     { "include": "#comment" },
     { "include": "#namespace" },
     { "include": "#claim" },
     { "include": "#issue" },
     { "include": "#effect" },
+    { "include": "#reason" },
     { "include": "#requirement" },
     { "include": "#norm" },
     { "include": "#application" },
@@ -22,7 +23,7 @@
     "comment": {
       "patterns": [
         {
-          "name": "comment.line.double-slash.matcha",
+          "name": "comment.line.double-slash.houjicha",
           "match": "//.*$"
         }
       ]
@@ -30,10 +31,10 @@
     "namespace": {
       "patterns": [
         {
-          "name": "entity.name.namespace.matcha",
+          "name": "entity.name.namespace.houjicha",
           "match": "^\\s*::.+$",
           "captures": {
-            "0": { "name": "entity.name.namespace.matcha" }
+            "0": { "name": "entity.name.namespace.houjicha" }
           }
         }
       ]
@@ -41,10 +42,10 @@
     "claim": {
       "patterns": [
         {
-          "name": "keyword.control.claim.matcha",
+          "name": "keyword.control.claim.houjicha",
           "match": "[+!]?#[^\\^<=:\\s]+",
           "captures": {
-            "0": { "name": "keyword.control.claim.matcha" }
+            "0": { "name": "keyword.control.claim.houjicha" }
           }
         }
       ]
@@ -52,10 +53,10 @@
     "reference": {
       "patterns": [
         {
-          "name": "entity.name.tag.reference.matcha",
+          "name": "entity.name.tag.reference.houjicha",
           "match": "\\^[^\\s<=:]+",
           "captures": {
-            "0": { "name": "entity.name.tag.reference.matcha" }
+            "0": { "name": "entity.name.tag.reference.houjicha" }
           }
         }
       ]
@@ -63,10 +64,10 @@
     "issue": {
       "patterns": [
         {
-          "name": "keyword.control.issue.matcha",
+          "name": "keyword.control.issue.houjicha",
           "match": "\\?\\s*[^~=>]+",
           "captures": {
-            "0": { "name": "keyword.control.issue.matcha" }
+            "0": { "name": "keyword.control.issue.houjicha" }
           }
         }
       ]
@@ -74,10 +75,21 @@
     "effect": {
       "patterns": [
         {
-          "name": "keyword.control.effect.matcha",
+          "name": "keyword.control.effect.houjicha",
           "match": ">>\\s*.+$",
           "captures": {
-            "0": { "name": "keyword.control.effect.matcha" }
+            "0": { "name": "keyword.control.effect.houjicha" }
+          }
+        }
+      ]
+    },
+    "reason": {
+      "patterns": [
+        {
+          "name": "comment.block.reason.houjicha",
+          "match": "^\\s*;.+$",
+          "captures": {
+            "0": { "name": "comment.block.reason.houjicha" }
           }
         }
       ]
@@ -85,10 +97,10 @@
     "requirement": {
       "patterns": [
         {
-          "name": "string.quoted.requirement.matcha",
+          "name": "string.quoted.requirement.houjicha",
           "match": "[+!]?「[^」]+」",
           "captures": {
-            "0": { "name": "string.quoted.requirement.matcha" }
+            "0": { "name": "string.quoted.requirement.houjicha" }
           }
         }
       ]
@@ -96,10 +108,10 @@
     "norm": {
       "patterns": [
         {
-          "name": "support.function.norm.matcha",
+          "name": "support.function.norm.houjicha",
           "match": "[+!]?%[^<=:\\s@]+[^<=@]*(?=\\s*(<=|:|$|@))",
           "captures": {
-            "0": { "name": "support.function.norm.matcha" }
+            "0": { "name": "support.function.norm.houjicha" }
           }
         }
       ]
@@ -107,10 +119,10 @@
     "application": {
       "patterns": [
         {
-          "name": "keyword.operator.application.matcha",
+          "name": "keyword.operator.application.houjicha",
           "match": "<=",
           "captures": {
-            "0": { "name": "keyword.operator.application.matcha" }
+            "0": { "name": "keyword.operator.application.houjicha" }
           }
         }
       ]
@@ -118,10 +130,10 @@
     "evaluation": {
       "patterns": [
         {
-          "name": "variable.parameter.evaluation.matcha",
+          "name": "variable.parameter.evaluation.houjicha",
           "match": "@[^\\s&|)]+",
           "captures": {
-            "0": { "name": "variable.parameter.evaluation.matcha" }
+            "0": { "name": "variable.parameter.evaluation.houjicha" }
           }
         }
       ]
@@ -129,23 +141,23 @@
     "logical-operators": {
       "patterns": [
         {
-          "name": "keyword.operator.logical.and.matcha",
+          "name": "keyword.operator.logical.and.houjicha",
           "match": "\\\\?&|＆"
         },
         {
-          "name": "keyword.operator.logical.or.matcha",
+          "name": "keyword.operator.logical.or.houjicha",
           "match": "\\||｜"
         },
         {
-          "name": "keyword.operator.reason.matcha",
+          "name": "keyword.operator.reason.houjicha",
           "match": "~>"
         },
         {
-          "name": "keyword.operator.implies.matcha",
+          "name": "keyword.operator.implies.houjicha",
           "match": "=>"
         },
         {
-          "name": "keyword.operator.colon.matcha",
+          "name": "keyword.operator.colon.houjicha",
           "match": ":"
         }
       ]
@@ -153,11 +165,11 @@
     "conclusion": {
       "patterns": [
         {
-          "name": "keyword.control.conclusion.positive.matcha",
+          "name": "keyword.control.conclusion.positive.houjicha",
           "match": "^\\s*\\+(?=#|「|%)"
         },
         {
-          "name": "keyword.control.conclusion.negative.matcha",
+          "name": "keyword.control.conclusion.negative.houjicha",
           "match": "^\\s*!(?=#|「|%)"
         }
       ]
@@ -165,10 +177,10 @@
     "constant-definition": {
       "patterns": [
         {
-          "name": "storage.type.constant.matcha",
+          "name": "storage.type.constant.houjicha",
           "match": "\\bas\\s+[^\\s]+",
           "captures": {
-            "0": { "name": "storage.type.constant.matcha" }
+            "0": { "name": "storage.type.constant.houjicha" }
           }
         }
       ]
@@ -176,10 +188,10 @@
     "constant-reference": {
       "patterns": [
         {
-          "name": "variable.other.constant.matcha",
+          "name": "variable.other.constant.houjicha",
           "match": "\\$[^\\s<=:]+",
           "captures": {
-            "0": { "name": "variable.other.constant.matcha" }
+            "0": { "name": "variable.other.constant.houjicha" }
           }
         }
       ]

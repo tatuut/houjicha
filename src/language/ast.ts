@@ -1,5 +1,5 @@
 /**
- * 本件 Matcha - 抽象構文木（AST）の型定義
+ * ほうじ茶（Houjicha）- 抽象構文木（AST）の型定義
  * 法的推論のための形式言語
  */
 
@@ -54,6 +54,7 @@ export interface Claim extends BaseNode {
   fact?: Fact;
   requirements: Requirement[];
   effect?: Effect;
+  reasonStatements?: ReasonStatement[];
 }
 
 /** 根拠条文への参照（^刑法235条1項） */
@@ -89,6 +90,7 @@ export interface Requirement extends BaseNode {
   fact?: Fact;
   subRequirements?: Requirement[];
   issue?: Issue;
+  reasonStatements?: ReasonStatement[];
 }
 
 /**
@@ -137,6 +139,12 @@ export interface Effect extends BaseNode {
   content: string;
 }
 
+/** 独立行の理由（; 思考過程のメモ） */
+export interface ReasonStatement extends BaseNode {
+  type: 'ReasonStatement';
+  content: string;
+}
+
 /** 定数定義（as 第三者の規範） */
 export interface ConstantDefinition extends BaseNode {
   type: 'ConstantDefinition';
@@ -165,6 +173,7 @@ export type ASTNode =
   | Reason
   | Conclusion
   | Effect
+  | ReasonStatement
   | ConstantDefinition
   | ConstantReference;
 

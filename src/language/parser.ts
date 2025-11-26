@@ -1,11 +1,11 @@
 /**
- * 本件 Matcha - 構文解析器（Parser）
+ * ほうじ茶（Houjicha）- 構文解析器（Parser）
  */
 
 import {
   Document, Namespace, Claim, Requirement, Norm, Fact, Evaluation,
   Issue, Reason, Effect, Reference, Comment, ConstantDefinition,
-  Range, Position, ASTNode
+  ReasonStatement, Range, Position, ASTNode
 } from './ast';
 import { Token, TokenType, tokenize, LexerError } from './lexer';
 
@@ -113,6 +113,9 @@ export class Parser {
         children.push(this.parseClaim());
       } else if (this.check(TokenType.NEWLINE)) {
         this.advance();
+      } else if (this.check(TokenType.SEMICOLON)) {
+        // トップレベルの理由文はスキップ（Claimに属さない）
+        this.parseReasonStatement();
       } else {
         this.addError(`予期しないトークン: ${this.peek().type}`);
         this.advance();
@@ -187,6 +190,25 @@ export class Parser {
     };
   }
 
+  // ===== 理由文（; ）解析 =====
+
+  private parseReasonStatement(): ReasonStatement {
+    const startPos = this.peek().range.start;
+    this.advance(); // ; を消費
+
+    let content = '';
+    while (!this.isAtEnd() && !this.check(TokenType.NEWLINE)) {
+      content += this.advance().value + ' ';
+    }
+
+    const endPos = this.peek().range.start;
+    return {
+      type: 'ReasonStatement',
+      content: content.trim(),
+      range: this.createRange(startPos, endPos)
+    };
+  }
+
   // ===== 主張（Claim）解析 =====
 
   private parseClaim(): Claim {
@@ -227,6 +249,7 @@ export class Parser {
 
     // 要件がある場合（: で終わる）
     const requirements: Requirement[] = [];
+    const reasonStatements: ReasonStatement[] = [];
     let effect: Effect | undefined;
 
     const hasRequirements = this.match(TokenType.COLON);
@@ -239,13 +262,25 @@ export class Parser {
         if (this.check(TokenType.LBRACKET_JP)) {
           requirements.push(this.parseRequirement());
         } else if (this.check(TokenType.PERCENT) ||
-                   this.check(TokenType.PLUS) ||
-                   this.check(TokenType.EXCLAIM)) {
+                   (this.check(TokenType.PLUS) && this.peek(1).type === TokenType.PERCENT) ||
+                   (this.check(TokenType.PLUS) && this.peek(1).type === TokenType.LBRACKET_JP) ||
+                   (this.check(TokenType.EXCLAIM) && this.peek(1).type === TokenType.PERCENT) ||
+                   (this.check(TokenType.EXCLAIM) && this.peek(1).type === TokenType.LBRACKET_JP)) {
+          // +% or !% or +「 or !「
+          if (this.peek(1).type === TokenType.LBRACKET_JP) {
+            requirements.push(this.parseRequirement());
+          } else {
+            requirements.push(this.parseNormAsRequirement());
+          }
+        } else if (this.check(TokenType.PLUS) || this.check(TokenType.EXCLAIM)) {
+          // 単独の + or ! の後に % か 「 が来る場合
           requirements.push(this.parseNormAsRequirement());
         } else if (this.check(TokenType.QUESTION)) {
           requirements.push(this.parseIssueAsRequirement());
         } else if (this.check(TokenType.ARROW_RIGHT)) {
           effect = this.parseEffect();
+        } else if (this.check(TokenType.SEMICOLON)) {
+          reasonStatements.push(this.parseReasonStatement());
         } else if (this.check(TokenType.NEWLINE)) {
           this.advance();
         } else if (this.check(TokenType.COMMENT)) {
@@ -274,6 +309,7 @@ export class Parser {
       fact,
       requirements,
       effect,
+      reasonStatements: reasonStatements.length > 0 ? reasonStatements : undefined,
       range: this.createRange(startPos, endPos)
     };
   }
@@ -299,7 +335,7 @@ export class Parser {
     };
   }
 
-  // ===== 事実解析 =====
+  // ===== 事実解析（複数@対応） =====
 
   private parseFact(): Fact {
     const startPos = this.peek().range.start;
@@ -309,29 +345,38 @@ export class Parser {
       return this.parseCompoundFact(startPos);
     }
 
-    // 単一事実
+    // 単一事実（複数@対応）
     let content = '';
+    const evaluations: Evaluation[] = [];
+
     while (!this.isAtEnd() &&
-           !this.check(TokenType.AT) &&
            !this.check(TokenType.COLON) &&
            !this.check(TokenType.AND) &&
            !this.check(TokenType.OR) &&
            !this.check(TokenType.RPAREN) &&
            !this.check(TokenType.ARROW_RIGHT) &&
+           !this.check(TokenType.SEMICOLON) &&
            !this.check(TokenType.NEWLINE)) {
+
+      if (this.check(TokenType.AT)) {
+        this.advance();
+        evaluations.push(this.parseEvaluation());
+        // @の後に更にテキストが続く可能性がある
+        continue;
+      }
+
       content += this.advance().value + ' ';
     }
 
-    let evaluation: Evaluation | undefined;
-    if (this.match(TokenType.AT)) {
-      evaluation = this.parseEvaluation();
-    }
-
     const endPos = this.peek().range.start;
+
+    // 最初の評価をmain evaluationとして使用（後方互換性）
+    const mainEvaluation = evaluations.length > 0 ? evaluations[0] : undefined;
+
     return {
       type: 'Fact',
       content: content.trim(),
-      evaluation,
+      evaluation: mainEvaluation,
       range: this.createRange(startPos, endPos)
     };
   }
@@ -381,6 +426,8 @@ export class Parser {
            !this.check(TokenType.OR) &&
            !this.check(TokenType.RPAREN) &&
            !this.check(TokenType.ARROW_RIGHT) &&
+           !this.check(TokenType.AT) &&
+           !this.check(TokenType.SEMICOLON) &&
            !this.check(TokenType.NEWLINE)) {
       content += this.advance().value + ' ';
     }
@@ -393,7 +440,7 @@ export class Parser {
     };
   }
 
-  // ===== 要件解析 =====
+  // ===== 要件解析（行内複合構文対応） =====
 
   private parseRequirement(): Requirement {
     const startPos = this.peek().range.start;
@@ -418,15 +465,19 @@ export class Parser {
     let norm: Norm | undefined;
     let fact: Fact | undefined;
     const subRequirements: Requirement[] = [];
+    const reasonStatements: ReasonStatement[] = [];
 
-    // 規範がある場合（: %規範）
+    // 行内複合構文: 「要件」: %規範 <= 事実
     if (this.match(TokenType.COLON)) {
-      if (this.check(TokenType.PERCENT)) {
+      // 規範がある場合
+      if (this.check(TokenType.PERCENT) ||
+          this.check(TokenType.PLUS) ||
+          this.check(TokenType.EXCLAIM)) {
         norm = this.parseNorm();
-      }
-
-      // あてはめ
-      if (this.match(TokenType.ARROW_LEFT)) {
+        // 規範の後のあてはめは規範に含まれる
+        fact = norm.fact;
+      } else if (this.match(TokenType.ARROW_LEFT)) {
+        // : <= の場合（規範なしであてはめ）
         fact = this.parseFact();
       }
     } else if (this.match(TokenType.ARROW_LEFT)) {
@@ -436,16 +487,28 @@ export class Parser {
 
     this.skipNewlines();
 
-    // 下位要件がある場合
+    // 下位要件がある場合（インデント）
     if (this.check(TokenType.INDENT)) {
       this.advance();
 
       while (!this.isAtEnd() && !this.check(TokenType.DEDENT)) {
         if (this.check(TokenType.PERCENT) ||
-            this.check(TokenType.PLUS) ||
-            this.check(TokenType.EXCLAIM)) {
+            (this.check(TokenType.PLUS) && this.peek(1).type === TokenType.PERCENT) ||
+            (this.check(TokenType.EXCLAIM) && this.peek(1).type === TokenType.PERCENT)) {
           subRequirements.push(this.parseNormAsRequirement());
+        } else if (this.check(TokenType.LBRACKET_JP) ||
+                   (this.check(TokenType.PLUS) && this.peek(1).type === TokenType.LBRACKET_JP) ||
+                   (this.check(TokenType.EXCLAIM) && this.peek(1).type === TokenType.LBRACKET_JP)) {
+          subRequirements.push(this.parseRequirement());
+        } else if (this.check(TokenType.ARROW_LEFT)) {
+          // 下位のあてはめ
+          this.advance();
+          fact = this.parseFact();
+        } else if (this.check(TokenType.SEMICOLON)) {
+          reasonStatements.push(this.parseReasonStatement());
         } else if (this.check(TokenType.NEWLINE)) {
+          this.advance();
+        } else if (this.check(TokenType.COMMENT)) {
           this.advance();
         } else {
           break;
@@ -465,11 +528,12 @@ export class Parser {
       norm,
       fact,
       subRequirements: subRequirements.length > 0 ? subRequirements : undefined,
+      reasonStatements: reasonStatements.length > 0 ? reasonStatements : undefined,
       range: this.createRange(startPos, endPos)
     };
   }
 
-  // ===== 規範を要件として解析 =====
+  // ===== 規範を要件として解析（規範ネスト対応） =====
 
   private parseNormAsRequirement(): Requirement {
     const startPos = this.peek().range.start;
@@ -478,21 +542,30 @@ export class Parser {
     this.skipNewlines();
 
     const subRequirements: Requirement[] = [];
+    const reasonStatements: ReasonStatement[] = [];
 
-    // 下位要件
+    // 下位要件（インデント）- 規範ネスト対応
     if (this.check(TokenType.INDENT)) {
       this.advance();
 
       while (!this.isAtEnd() && !this.check(TokenType.DEDENT)) {
         if (this.check(TokenType.PERCENT) ||
-            this.check(TokenType.PLUS) ||
-            this.check(TokenType.EXCLAIM)) {
+            (this.check(TokenType.PLUS) && this.peek(1).type === TokenType.PERCENT) ||
+            (this.check(TokenType.EXCLAIM) && this.peek(1).type === TokenType.PERCENT)) {
           subRequirements.push(this.parseNormAsRequirement());
+        } else if (this.check(TokenType.LBRACKET_JP) ||
+                   (this.check(TokenType.PLUS) && this.peek(1).type === TokenType.LBRACKET_JP) ||
+                   (this.check(TokenType.EXCLAIM) && this.peek(1).type === TokenType.LBRACKET_JP)) {
+          subRequirements.push(this.parseRequirement());
         } else if (this.check(TokenType.ARROW_LEFT)) {
           // あてはめを規範に追加
           this.advance();
           norm.fact = this.parseFact();
+        } else if (this.check(TokenType.SEMICOLON)) {
+          reasonStatements.push(this.parseReasonStatement());
         } else if (this.check(TokenType.NEWLINE)) {
+          this.advance();
+        } else if (this.check(TokenType.COMMENT)) {
           this.advance();
         } else {
           break;
@@ -512,11 +585,12 @@ export class Parser {
       norm,
       fact: norm.fact,
       subRequirements: subRequirements.length > 0 ? subRequirements : undefined,
+      reasonStatements: reasonStatements.length > 0 ? reasonStatements : undefined,
       range: this.createRange(startPos, endPos)
     };
   }
 
-  // ===== 規範解析 =====
+  // ===== 規範解析（規範ネスト対応） =====
 
   private parseNorm(): Norm {
     const startPos = this.peek().range.start;
@@ -538,6 +612,7 @@ export class Parser {
            !this.check(TokenType.ARROW_LEFT) &&
            !this.check(TokenType.COLON) &&
            !this.check(TokenType.AS) &&
+           !this.check(TokenType.SEMICOLON) &&
            !this.check(TokenType.NEWLINE)) {
       content += this.advance().value + ' ';
     }
@@ -553,10 +628,16 @@ export class Parser {
       reference = this.parseReference();
     }
 
-    // 下位規範（: %）
+    // 下位規範（: %）または 行内あてはめ
     if (this.match(TokenType.COLON)) {
-      if (this.check(TokenType.PERCENT)) {
+      if (this.check(TokenType.PERCENT) ||
+          this.check(TokenType.PLUS) ||
+          this.check(TokenType.EXCLAIM)) {
         subNorm = this.parseNorm();
+        // 下位規範のあてはめを引き継ぐ
+        if (subNorm.fact && !fact) {
+          fact = subNorm.fact;
+        }
       }
     }
 

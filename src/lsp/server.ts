@@ -1,5 +1,5 @@
 /**
- * 本件 Matcha - Language Server Protocol サーバー
+ * ほうじ茶（Houjicha）- Language Server Protocol サーバー
  * 条文データベース連携、賢い補完、欠落警告対応版
  */
 
@@ -298,44 +298,35 @@ connection.onCompletion((params: TextDocumentPositionParams): CompletionItem[] =
   const offset = document.offsetAt(params.position);
   const lineText = text.substring(text.lastIndexOf('\n', offset - 1) + 1, offset);
   const items: CompletionItem[] = [];
-  let sortIndex = 0;
-
-  // 補完アイテムにソート順と優先フラグを付与するヘルパー
-  const addItem = (item: CompletionItem, preselect = false) => {
-    items.push({
-      ...item,
-      sortText: String(sortIndex++).padStart(5, '0'),  // 00000, 00001, ...
-      preselect: preselect && sortIndex === 1,
-      filterText: item.label as string,
-    });
-  };
 
   // # の後：条文データベースから罪名・法的概念
   if (lineText.endsWith('#') || lineText.match(/#\S*$/)) {
     // データベースから補完
     for (const [id, article] of articleDatabase.articles) {
-      addItem({
+      items.push({
         label: article.名称 || id,
         kind: CompletionItemKind.Class,
         detail: id,
         documentation: article.原文.substring(0, 100) + '...',
-      }, true);
+      });
     }
     // フォールバック
     if (items.length === 0) {
-      addItem({ label: '窃盗罪', kind: CompletionItemKind.Class, detail: '刑法235条' }, true);
-      addItem({ label: '強盗罪', kind: CompletionItemKind.Class, detail: '刑法236条' });
+      items.push(
+        { label: '窃盗罪', kind: CompletionItemKind.Class, detail: '刑法235条' },
+        { label: '強盗罪', kind: CompletionItemKind.Class, detail: '刑法236条' },
+      );
     }
   }
 
   // ^ の後：条文番号
   if (lineText.endsWith('^') || lineText.match(/\^\S*$/)) {
     for (const id of articleDatabase.articles.keys()) {
-      addItem({
+      items.push({
         label: id,
         kind: CompletionItemKind.Reference,
         detail: articleDatabase.articles.get(id)?.名称,
-      }, true);
+      });
     }
   }
 
@@ -348,18 +339,20 @@ connection.onCompletion((params: TextDocumentPositionParams): CompletionItem[] =
       if (article) {
         const norms = getAllNorms(article);
         for (const { context, norm } of norms) {
-          addItem({
+          items.push({
             label: norm.規範,
             kind: CompletionItemKind.Function,
             detail: context,
             documentation: norm.出典 ? `出典: ${norm.出典}` : undefined,
-          }, true);
+          });
         }
       }
     }
     // フォールバック
     if (items.length === 0) {
-      addItem({ label: '事実の認識・認容', kind: CompletionItemKind.Function, detail: '故意' }, true);
+      items.push(
+        { label: '事実の認識・認容', kind: CompletionItemKind.Function, detail: '故意' },
+      );
     }
   }
 
@@ -371,11 +364,11 @@ connection.onCompletion((params: TextDocumentPositionParams): CompletionItem[] =
       if (article) {
         for (const annotation of article.アノテーション) {
           if (annotation.範囲 && annotation.種別 === '要件') {
-            addItem({
+            items.push({
               label: annotation.範囲 + '」',
               kind: CompletionItemKind.Property,
               detail: annotation.解釈?.[0]?.規範,
-            }, true);
+            });
           }
         }
       }
@@ -391,12 +384,12 @@ connection.onCompletion((params: TextDocumentPositionParams): CompletionItem[] =
         const issues = getIssues(article);
         for (const { issue } of issues) {
           const norm = issue.解釈[0]?.規範 || '';
-          addItem({
+          items.push({
             label: ` ${issue.理由 || issue.問題} => %${norm}`,
             kind: CompletionItemKind.Snippet,
             detail: issue.問題,
             insertTextFormat: InsertTextFormat.Snippet,
-          }, true);
+          });
         }
       }
     }
@@ -404,22 +397,24 @@ connection.onCompletion((params: TextDocumentPositionParams): CompletionItem[] =
 
   // :: の後：論述空間
   if (lineText.endsWith('::') || lineText.endsWith('：：')) {
-    addItem({ label: '甲の罪責', kind: CompletionItemKind.Module }, true);
-    addItem({ label: '乙の罪責', kind: CompletionItemKind.Module });
-    addItem({ label: '設問1', kind: CompletionItemKind.Module });
-    addItem({ label: '設問2', kind: CompletionItemKind.Module });
+    items.push(
+      { label: '甲の罪責', kind: CompletionItemKind.Module },
+      { label: '乙の罪責', kind: CompletionItemKind.Module },
+      { label: '設問1', kind: CompletionItemKind.Module },
+      { label: '設問2', kind: CompletionItemKind.Module },
+    );
   }
 
   // /gen: テンプレート生成
   if (lineText.match(/\/gen\s*$/)) {
     for (const [id, article] of articleDatabase.articles) {
-      addItem({
+      items.push({
         label: `生成: ${article.名称 || id}`,
         kind: CompletionItemKind.Snippet,
         insertText: generateTemplate(article),
         detail: 'テンプレートを生成',
         documentation: article.原文.substring(0, 100),
-      }, true);
+      });
     }
   }
 
@@ -428,24 +423,26 @@ connection.onCompletion((params: TextDocumentPositionParams): CompletionItem[] =
     const cached = documentCache.get(params.textDocument.uri);
     if (cached) {
       for (const [name, def] of cached.document.constants) {
-        addItem({
+        items.push({
           label: name,
           kind: CompletionItemKind.Constant,
           detail: def.value.content,
-        }, true);
+        });
       }
     }
   }
 
   // 行頭での補完
   if (lineText.trim() === '') {
-    addItem({ label: '#', kind: CompletionItemKind.Keyword, detail: '主張' }, true);
-    addItem({ label: '::', kind: CompletionItemKind.Keyword, detail: '論述空間' });
-    addItem({ label: '「', kind: CompletionItemKind.Keyword, detail: '要件' });
-    addItem({ label: '%', kind: CompletionItemKind.Keyword, detail: '規範' });
-    addItem({ label: '?', kind: CompletionItemKind.Keyword, detail: '論点' });
-    addItem({ label: '>>', kind: CompletionItemKind.Keyword, detail: '効果' });
-    addItem({ label: '/gen', kind: CompletionItemKind.Keyword, detail: 'テンプレート生成' });
+    items.push(
+      { label: '#', kind: CompletionItemKind.Keyword, detail: '主張' },
+      { label: '::', kind: CompletionItemKind.Keyword, detail: '論述空間' },
+      { label: '「', kind: CompletionItemKind.Keyword, detail: '要件' },
+      { label: '%', kind: CompletionItemKind.Keyword, detail: '規範' },
+      { label: '?', kind: CompletionItemKind.Keyword, detail: '論点' },
+      { label: '>>', kind: CompletionItemKind.Keyword, detail: '効果' },
+      { label: '/gen', kind: CompletionItemKind.Keyword, detail: 'テンプレート生成' },
+    );
   }
 
   return items;
