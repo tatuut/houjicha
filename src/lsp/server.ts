@@ -562,7 +562,7 @@ connection.onHover((params: TextDocumentPositionParams): Hover | null => {
   // カーソル位置の前後を取得して、より正確なコンテキストを把握
   const currentClaim = findCurrentClaim(text, document.offsetAt(position));
 
-  // 要件「」のホバー：詳細情報を表示
+  // 要件「」のホバー：詳細情報を表示（上位文脈付き）
   const reqMatch = line.match(/「([^」]+)」/);
   if (reqMatch) {
     const reqName = reqMatch[1];
@@ -575,7 +575,10 @@ connection.onHover((params: TextDocumentPositionParams): Hover | null => {
           a => a.範囲 === reqName || a.name === reqName
         );
         if (annotation) {
-          let content = `## 「${reqName}」\n\n`;
+          // 上位文脈を表示
+          let content = currentClaim
+            ? `## ${currentClaim} > 「${reqName}」\n\n`
+            : `## 「${reqName}」\n\n`;
 
           // 規範
           if (annotation.解釈 && annotation.解釈.length > 0) {
@@ -620,7 +623,7 @@ connection.onHover((params: TextDocumentPositionParams): Hover | null => {
     }
   }
 
-  // 規範%のホバー：詳細情報を表示
+  // 規範%のホバー：詳細情報を表示（上位文脈付き）
   const normMatch = line.match(/%([^\s<=:@]+)/);
   if (normMatch) {
     const normText = normMatch[1];
@@ -635,7 +638,12 @@ connection.onHover((params: TextDocumentPositionParams): Hover | null => {
           content += `**${found.norm.規範}**\n\n`;
           if (found.norm.出典) content += `**出典**: ${found.norm.出典}\n\n`;
           if (found.norm.説明) content += `${found.norm.説明}\n\n`;
-          content += `**文脈**: ${found.context}`;
+          // 上位文脈を表示（主張名 > 要件文脈）
+          if (currentClaim) {
+            content += `**上位文脈**: ${currentClaim} > ${found.context}`;
+          } else {
+            content += `**文脈**: ${found.context}`;
+          }
           return { contents: { kind: MarkupKind.Markdown, value: content } };
         }
       }
@@ -1066,35 +1074,42 @@ connection.onDocumentSymbol((params): DocumentSymbol[] => {
   }
 
   function processRequirements(requirements: Requirement[]): DocumentSymbol[] {
-    return requirements.map(req => {
-      const children: DocumentSymbol[] = [];
-      if (req.subRequirements) {
-        children.push(...processRequirements(req.subRequirements));
-      }
-      return createSymbol(req.name, SymbolKind.Property, req.range, children.length > 0 ? children : undefined);
-    });
+    if (!requirements) return [];
+    return requirements
+      .filter(req => req && req.name && req.range)  // 不完全なデータをフィルタ
+      .map(req => {
+        const children: DocumentSymbol[] = [];
+        if (req.subRequirements) {
+          children.push(...processRequirements(req.subRequirements));
+        }
+        return createSymbol(req.name || '(名前なし)', SymbolKind.Property, req.range, children.length > 0 ? children : undefined);
+      });
   }
 
-  function processClaim(claim: Claim): DocumentSymbol {
+  function processClaim(claim: Claim): DocumentSymbol | null {
+    if (!claim || !claim.range) return null;
     const prefix = claim.concluded === 'positive' ? '+' : claim.concluded === 'negative' ? '!' : '';
-    const children = processRequirements(claim.requirements);
-    if (claim.effect) {
+    const children = processRequirements(claim.requirements || []);
+    if (claim.effect && claim.effect.content && claim.effect.range) {
       children.push(createSymbol(claim.effect.content, SymbolKind.Event, claim.effect.range));
     }
-    return createSymbol(`${prefix}#${claim.name}`, SymbolKind.Class, claim.range, children.length > 0 ? children : undefined);
+    return createSymbol(`${prefix}#${claim.name || '(名前なし)'}`, SymbolKind.Class, claim.range, children.length > 0 ? children : undefined);
   }
 
   for (const child of cached.document.children) {
+    if (!child || !child.range) continue;
     if (child.type === 'Namespace') {
       const nsChildren: DocumentSymbol[] = [];
       for (const nsChild of child.children) {
         if (nsChild.type === 'Claim') {
-          nsChildren.push(processClaim(nsChild));
+          const symbol = processClaim(nsChild);
+          if (symbol) nsChildren.push(symbol);
         }
       }
-      symbols.push(createSymbol(`::${child.name}`, SymbolKind.Namespace, child.range, nsChildren.length > 0 ? nsChildren : undefined));
+      symbols.push(createSymbol(`::${child.name || '(名前なし)'}`, SymbolKind.Namespace, child.range, nsChildren.length > 0 ? nsChildren : undefined));
     } else if (child.type === 'Claim') {
-      symbols.push(processClaim(child));
+      const symbol = processClaim(child);
+      if (symbol) symbols.push(symbol);
     }
   }
 

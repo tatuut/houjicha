@@ -306,18 +306,19 @@ export class Parser {
         if (this.check(TokenType.LBRACKET_JP)) {
           requirements.push(this.parseRequirement());
         } else if (this.check(TokenType.PERCENT) ||
-                   (this.check(TokenType.PLUS) && this.peek(1).type === TokenType.PERCENT) ||
+                   this.check(TokenType.DOLLAR) ||
+                   (this.check(TokenType.PLUS) && (this.peek(1).type === TokenType.PERCENT || this.peek(1).type === TokenType.DOLLAR)) ||
                    (this.check(TokenType.PLUS) && this.peek(1).type === TokenType.LBRACKET_JP) ||
-                   (this.check(TokenType.EXCLAIM) && this.peek(1).type === TokenType.PERCENT) ||
+                   (this.check(TokenType.EXCLAIM) && (this.peek(1).type === TokenType.PERCENT || this.peek(1).type === TokenType.DOLLAR)) ||
                    (this.check(TokenType.EXCLAIM) && this.peek(1).type === TokenType.LBRACKET_JP)) {
-          // +% or !% or +「 or !「
+          // +% or !% or +「 or !「 or +$ or !$ or $ or %
           if (this.peek(1).type === TokenType.LBRACKET_JP) {
             requirements.push(this.parseRequirement());
           } else {
             requirements.push(this.parseNormAsRequirement());
           }
         } else if (this.check(TokenType.PLUS) || this.check(TokenType.EXCLAIM)) {
-          // 単独の + or ! の後に % か 「 が来る場合
+          // 単独の + or ! の後に % か $ か 「 が来る場合
           requirements.push(this.parseNormAsRequirement());
         } else if (this.check(TokenType.QUESTION)) {
           requirements.push(this.parseIssueAsRequirement());
@@ -526,10 +527,11 @@ export class Parser {
     const subRequirements: Requirement[] = [];
     const reasonStatements: ReasonStatement[] = [];
 
-    // 行内複合構文: 「要件」: %規範 <= 事実
+    // 行内複合構文: 「要件」: %規範 <= 事実 または 「要件」: $定数 <= 事実
     if (this.match(TokenType.COLON)) {
-      // 規範がある場合
+      // 規範がある場合（%規範 または $定数参照）
       if (this.check(TokenType.PERCENT) ||
+          this.check(TokenType.DOLLAR) ||
           this.check(TokenType.PLUS) ||
           this.check(TokenType.EXCLAIM)) {
         norm = this.parseNorm();
@@ -552,8 +554,9 @@ export class Parser {
 
       while (!this.isAtEnd() && !this.check(TokenType.DEDENT)) {
         if (this.check(TokenType.PERCENT) ||
-            (this.check(TokenType.PLUS) && this.peek(1).type === TokenType.PERCENT) ||
-            (this.check(TokenType.EXCLAIM) && this.peek(1).type === TokenType.PERCENT)) {
+            this.check(TokenType.DOLLAR) ||
+            (this.check(TokenType.PLUS) && (this.peek(1).type === TokenType.PERCENT || this.peek(1).type === TokenType.DOLLAR)) ||
+            (this.check(TokenType.EXCLAIM) && (this.peek(1).type === TokenType.PERCENT || this.peek(1).type === TokenType.DOLLAR))) {
           subRequirements.push(this.parseNormAsRequirement());
         } else if (this.check(TokenType.LBRACKET_JP) ||
                    (this.check(TokenType.PLUS) && this.peek(1).type === TokenType.LBRACKET_JP) ||
@@ -609,8 +612,9 @@ export class Parser {
 
       while (!this.isAtEnd() && !this.check(TokenType.DEDENT)) {
         if (this.check(TokenType.PERCENT) ||
-            (this.check(TokenType.PLUS) && this.peek(1).type === TokenType.PERCENT) ||
-            (this.check(TokenType.EXCLAIM) && this.peek(1).type === TokenType.PERCENT)) {
+            this.check(TokenType.DOLLAR) ||
+            (this.check(TokenType.PLUS) && (this.peek(1).type === TokenType.PERCENT || this.peek(1).type === TokenType.DOLLAR)) ||
+            (this.check(TokenType.EXCLAIM) && (this.peek(1).type === TokenType.PERCENT || this.peek(1).type === TokenType.DOLLAR))) {
           subRequirements.push(this.parseNormAsRequirement());
         } else if (this.check(TokenType.LBRACKET_JP) ||
                    (this.check(TokenType.PLUS) && this.peek(1).type === TokenType.LBRACKET_JP) ||
