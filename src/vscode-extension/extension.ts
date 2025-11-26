@@ -32,13 +32,14 @@ class HoujichaInlineCompletionProvider implements vscode.InlineCompletionItemPro
     const textBeforeCursor = lineText.substring(0, position.character);
 
     // 補完をトリガーする条件をチェック
+    // 「」は自動閉じ括弧と競合するため除外
     const shouldTrigger =
-      textBeforeCursor.endsWith('(') ||
       textBeforeCursor.endsWith('%') ||
       textBeforeCursor.endsWith('?') ||
       textBeforeCursor.endsWith('？') ||
       textBeforeCursor.endsWith('$') ||
-      textBeforeCursor.endsWith('#');
+      textBeforeCursor.endsWith('#') ||
+      (textBeforeCursor.match(/^\s+$/) && textBeforeCursor.length >= 4); // インデント行
 
     if (!shouldTrigger) {
       return null;
@@ -63,11 +64,10 @@ class HoujichaInlineCompletionProvider implements vscode.InlineCompletionItemPro
         } else if (item.insertText instanceof vscode.SnippetString) {
           return item.insertText.value;
         }
-        // insertTextがない場合はlabelを使う
+        // insertTextがない場合はlabelを使うが、「」マーカーを除去
         const label = typeof item.label === 'string' ? item.label : item.label.label;
-        // ✓と先頭の(を除去（(は既に入力済み）
-        const cleanLabel = label.replace(/^[✓ ]+/, '').replace(/^\(/, '');
-        return cleanLabel + ' <= ';
+        // ✓や「」を除去してクリーンなテキストを返す
+        return label.replace(/^[✓ ]+/, '').replace(/^「/, '').replace(/」$/, '') + '」 <= ';
       };
 
       // ✓マークが付いていない最初の候補を探す

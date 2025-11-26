@@ -102,7 +102,7 @@ connection.onInitialize((params: InitializeParams): InitializeResult => {
       textDocumentSync: TextDocumentSyncKind.Incremental,
       completionProvider: {
         resolveProvider: true,
-        triggerCharacters: ['#', '%', '(', '^', '@', '$', '?', ':', '/'],
+        triggerCharacters: ['#', '%', '^', '@', '$', '?', ':', '/'],
       },
       hoverProvider: true,
       definitionProvider: true,
@@ -266,7 +266,7 @@ function validateSemantics(doc: Document): Diagnostic[] {
                 start: { line: claim.range.start.line, character: claim.range.start.column },
                 end: { line: claim.range.end.line, character: claim.range.end.column },
               },
-              message: `(${reqName})の検討が見つかりません`,
+              message: `「${reqName}」の検討が見つかりません`,
               source: 'ほうじ茶',
               data: { missingRequirement: reqName, articleId: article.id },
             });
@@ -288,7 +288,7 @@ function validateSemantics(doc: Document): Diagnostic[] {
               start: { line: claim.range.start.line, character: claim.range.start.column },
               end: { line: claim.range.end.line, character: claim.range.end.column },
             },
-            message: `論点(${issue.問題})の検討を推奨`,
+            message: `論点「${issue.問題}」の検討を推奨`,
             source: 'ほうじ茶',
           });
         }
@@ -411,140 +411,105 @@ connection.onCompletion((params: TextDocumentPositionParams): CompletionItem[] =
     }
   }
 
-  // (の後：要件名（条文データベースから、条文順でソート）
-  const lastChar = lineText.trim().slice(-1);
-  const has開括弧 = lineText.endsWith('(') || lastChar === '(' || (lineText.includes('(') && !lineText.includes(')'));
+  // インデント行（主張の内部）で要件候補を表示
+  // 「」は使わない - 自動閉じ括弧と競合するため
+  const isIndentedLine = lineText.match(/^\s+/) && !lineText.trim().startsWith('//');
+  const currentClaim = findCurrentClaim(text, offset);
 
-  connection.console.log(`[補完デバッグ] lineText="${lineText}", lastChar="${lastChar}", has開括弧=${has開括弧}`);
+  connection.console.log(`[補完デバッグ] isIndented=${!!isIndentedLine}, claim=${currentClaim}, DB=${articleDatabase.articles.size}件`);
 
-  if (has開括弧) {
-    const currentClaim = findCurrentClaim(text, offset);
-    connection.console.log(`[補完] 現在の主張: ${currentClaim}, DB件数: ${articleDatabase.articles.size}`);
+  if (isIndentedLine && currentClaim) {
+    const article = findArticle(articleDatabase, currentClaim);
+    connection.console.log(`[補完] 条文検索結果: ${article ? article.id : 'なし'}`);
 
-    if (currentClaim) {
-      const article = findArticle(articleDatabase, currentClaim);
-      connection.console.log(`[補完] 条文検索結果: ${article ? article.id : 'なし'}`);
-
-      if (article) {
-        // 既に書かれている要件を収集
-        const cached = documentCache.get(params.textDocument.uri);
-        const writtenReqs = new Set<string>();
-        if (cached) {
-          for (const child of cached.document.children) {
-            if (child.type === 'Claim') {
-              for (const req of child.requirements) {
-                writtenReqs.add(req.name);
-              }
+    if (article) {
+      // 既に書かれている要件を収集
+      const cached = documentCache.get(params.textDocument.uri);
+      const writtenReqs = new Set<string>();
+      if (cached) {
+        for (const child of cached.document.children) {
+          if (child.type === 'Claim') {
+            for (const req of child.requirements) {
+              writtenReqs.add(req.name);
             }
           }
         }
-
-        let sortOrder = 0;
-        for (const annotation of article.アノテーション) {
-          // 範囲があるか、nameがある要件をすべて補完候補に
-          const reqName = annotation.範囲 || annotation.name;
-          if (reqName && (annotation.種別 === '要件' || annotation.種別 === '論点')) {
-            sortOrder++;
-            const isWritten = writtenReqs.has(reqName);
-
-            // Markdown形式の詳細説明を構築
-            let docContent = isWritten
-              ? `## ✓ (${reqName})（記述済み）\n\n`
-              : `## (${reqName})\n\n`;
-
-            // 種別を表示
-            if (annotation.種別 === '論点') {
-              docContent += `**論点（不文の要件）**\n\n`;
-              if (annotation.理由) {
-                docContent += `_${annotation.理由}_\n\n`;
-              }
-            }
-
-            // 規範
-            if (annotation.解釈 && annotation.解釈.length > 0) {
-              docContent += `### 規範\n`;
-              for (const interp of annotation.解釈) {
-                docContent += `- **${interp.規範}**`;
-                if (interp.出典) docContent += ` (${interp.出典})`;
-                docContent += '\n';
-                if (interp.説明) docContent += `  - ${interp.説明}\n`;
-              }
-              docContent += '\n';
-            }
-
-            // 下位要件
-            if (annotation.下位要件 && annotation.下位要件.length > 0) {
-              docContent += `### 下位要件\n`;
-              for (const sub of annotation.下位要件) {
-                docContent += `- **${sub.name}**`;
-                if (sub.規範) docContent += `: ${sub.規範}`;
-                docContent += '\n';
-              }
-              docContent += '\n';
-            }
-
-            // 関連論点
-            if (annotation.論点 && annotation.論点.length > 0) {
-              docContent += `### 関連論点\n`;
-              for (const issue of annotation.論点) {
-                docContent += `- **${issue.問題}**`;
-                if (issue.理由) docContent += `: ${issue.理由}`;
-                docContent += '\n';
-              }
-            }
-
-            // 要件は()で、論点（不文の要件）は%で補完
-            if (annotation.種別 === '要件' && annotation.範囲) {
-              items.push({
-                label: (isWritten ? '✓ ' : '') + '(' + reqName + ')',
-                kind: CompletionItemKind.Property,
-                detail: annotation.解釈?.[0]?.規範 || '構成要件',
-                documentation: {
-                  kind: MarkupKind.Markdown,
-                  value: docContent,
-                },
-                sortText: `${isWritten ? '1' : '0'}-${String(sortOrder).padStart(2, '0')}`,
-                filterText: '(' + reqName,
-                // (は既に入力済み、)は補完に含める
-                insertText: annotation.解釈?.[0]?.規範
-                  ? `${reqName}): %${annotation.解釈[0].規範} <= `
-                  : `${reqName}) <= `,
-                insertTextFormat: InsertTextFormat.PlainText,
-              });
-            } else {
-              // 論点や name のみの要件は %規範 形式で補完
-              const norm = annotation.解釈?.[0]?.規範 || reqName;
-              items.push({
-                label: (isWritten ? '✓ ' : '') + '(' + reqName + ')',
-                kind: CompletionItemKind.Property,
-                detail: `${annotation.種別}：${norm}`,
-                documentation: {
-                  kind: MarkupKind.Markdown,
-                  value: docContent,
-                },
-                sortText: `${isWritten ? '1' : '0'}-${String(sortOrder).padStart(2, '0')}`,
-                filterText: '(' + reqName,
-                // (は既に入力済みなので、それ以降を挿入
-                insertText: `${reqName}): %${norm} <= `,
-                insertTextFormat: InsertTextFormat.PlainText,
-              });
-            }
-          }
-        }
-        connection.console.log(`[補完] ${items.length}件の要件候補を生成`);
-      } else {
-        // 条文が見つからない場合のフォールバック
-        connection.console.log(`[補完] フォールバック: 条文未発見 (主張=${currentClaim})`);
-        items.push(
-          { label: '(要件名)', kind: CompletionItemKind.Property, detail: '要件を追加', insertText: '(要件名) <= ' },
-        );
       }
-    } else {
-      // 主張が見つからない場合
-      connection.console.log(`[補完] フォールバック: 主張未発見`);
-      items.push(
-        { label: '要件名」', kind: CompletionItemKind.Property, detail: '要件を追加', insertText: '要件名」 <= ' },
-      );
+
+      let sortOrder = 0;
+      for (const annotation of article.アノテーション) {
+        // 範囲があるか、nameがある要件をすべて補完候補に
+        const reqName = annotation.範囲 || annotation.name;
+        if (reqName && (annotation.種別 === '要件' || annotation.種別 === '論点')) {
+          sortOrder++;
+          const isWritten = writtenReqs.has(reqName);
+
+          // Markdown形式の詳細説明を構築
+          let docContent = isWritten
+            ? `## ✓ ${reqName}（記述済み）\n\n`
+            : `## ${reqName}\n\n`;
+
+          // 種別を表示
+          if (annotation.種別 === '論点') {
+            docContent += `**論点（不文の要件）**\n\n`;
+            if (annotation.理由) {
+              docContent += `_${annotation.理由}_\n\n`;
+            }
+          }
+
+          // 規範
+          if (annotation.解釈 && annotation.解釈.length > 0) {
+            docContent += `### 規範\n`;
+            for (const interp of annotation.解釈) {
+              docContent += `- **${interp.規範}**`;
+              if (interp.出典) docContent += ` (${interp.出典})`;
+              docContent += '\n';
+              if (interp.説明) docContent += `  - ${interp.説明}\n`;
+            }
+            docContent += '\n';
+          }
+
+          // 下位要件
+          if (annotation.下位要件 && annotation.下位要件.length > 0) {
+            docContent += `### 下位要件\n`;
+            for (const sub of annotation.下位要件) {
+              docContent += `- **${sub.name}**`;
+              if (sub.規範) docContent += `: ${sub.規範}`;
+              docContent += '\n';
+            }
+            docContent += '\n';
+          }
+
+          // 関連論点
+          if (annotation.論点 && annotation.論点.length > 0) {
+            docContent += `### 関連論点\n`;
+            for (const issue of annotation.論点) {
+              docContent += `- **${issue.問題}**`;
+              if (issue.理由) docContent += `: ${issue.理由}`;
+              docContent += '\n';
+            }
+          }
+
+          // 要件は「」で囲んだ完全形式で補完
+          const norm = annotation.解釈?.[0]?.規範;
+          items.push({
+            label: (isWritten ? '✓ ' : '') + reqName,
+            kind: CompletionItemKind.Property,
+            detail: norm || '構成要件',
+            documentation: {
+              kind: MarkupKind.Markdown,
+              value: docContent,
+            },
+            sortText: `${isWritten ? '1' : '0'}-${String(sortOrder).padStart(2, '0')}`,
+            // 完全な行を挿入（「」含む）
+            insertText: norm
+              ? `「${reqName}」: %${norm} <= `
+              : `「${reqName}」 <= `,
+            insertTextFormat: InsertTextFormat.PlainText,
+          });
+        }
+      }
+      connection.console.log(`[補完] ${items.length}件の要件候補を生成`);
     }
 
     // DBが空の場合の警告
@@ -594,7 +559,7 @@ connection.onCompletion((params: TextDocumentPositionParams): CompletionItem[] =
             docContent += `**問題の所在**: ${issue.理由}\n\n`;
           }
           if (annotation.範囲) {
-            docContent += `**関連要件**: (${annotation.範囲})\n\n`;
+            docContent += `**関連要件**: 「${annotation.範囲}」\n\n`;
           }
 
           docContent += `### 学説・判例\n`;
@@ -665,7 +630,7 @@ connection.onCompletion((params: TextDocumentPositionParams): CompletionItem[] =
     items.push(
       { label: '#', kind: CompletionItemKind.Keyword, detail: '主張' },
       { label: '::', kind: CompletionItemKind.Keyword, detail: '論述空間' },
-      { label: '(', kind: CompletionItemKind.Keyword, detail: '要件' },
+      { label: '「', kind: CompletionItemKind.Keyword, detail: '要件' },
       { label: '%', kind: CompletionItemKind.Keyword, detail: '規範' },
       { label: '?', kind: CompletionItemKind.Keyword, detail: '論点' },
       { label: '>>', kind: CompletionItemKind.Keyword, detail: '効果' },
@@ -709,8 +674,8 @@ connection.onHover((params: TextDocumentPositionParams): Hover | null => {
   // カーソル位置の前後を取得して、より正確なコンテキストを把握
   const currentClaim = findCurrentClaim(text, document.offsetAt(position));
 
-  // 要件()のホバー：詳細情報を表示（上位文脈付き）
-  const reqMatch = line.match(/\(([^)]+)\)/);
+  // 要件「」のホバー：詳細情報を表示（上位文脈付き）
+  const reqMatch = line.match(/「([^」]+)」/);
   if (reqMatch) {
     const reqName = reqMatch[1];
     const reqIndex = line.indexOf(reqMatch[0]);
@@ -724,8 +689,8 @@ connection.onHover((params: TextDocumentPositionParams): Hover | null => {
         if (annotation) {
           // 上位文脈を表示
           let content = currentClaim
-            ? `## ${currentClaim} > (${reqName})\n\n`
-            : `## (${reqName})\n\n`;
+            ? `## ${currentClaim} > 「${reqName}」\n\n`
+            : `## 「${reqName}」\n\n`;
 
           // 規範
           if (annotation.解釈 && annotation.解釈.length > 0) {
@@ -811,7 +776,7 @@ connection.onHover((params: TextDocumentPositionParams): Hover | null => {
         content += `### 要件\n`;
         for (const a of article.アノテーション.filter(a => a.種別 === '要件')) {
           const name = a.範囲 || a.name || '';
-          content += `- **(${name})**`;
+          content += `- **「${name}」**`;
           if (a.解釈?.[0]?.規範) content += `: ${a.解釈[0].規範}`;
           content += '\n';
         }
@@ -883,7 +848,7 @@ connection.onHover((params: TextDocumentPositionParams): Hover | null => {
   const hoverInfo: { [key: string]: { title: string; description: string } } = {
     '#': { title: '主張（Claim）', description: '法的主張を示します。' },
     '%': { title: '規範（Norm）', description: '法的規範・解釈を示します。' },
-    '(': { title: '要件（Requirement）', description: '条文の構成要件を示します。' },
+    '「': { title: '要件（Requirement）', description: '条文の構成要件を示します。' },
     '?': { title: '論点（Issue）', description: '法的論点を提起します。' },
     '>>': { title: '効果（Effect）', description: '法的効果・結論を示します。' },
     '<=': { title: 'あてはめ（Application）', description: '事実を法的概念にあてはめます。' },
@@ -991,17 +956,17 @@ connection.onCodeAction((params: CodeActionParams): CodeAction[] => {
             break;
           }
           // インデントされた要件行があれば更新
-          if (l.match(/^\s+\(/) || l.match(/^\s+%/) || l.match(/^\s+;/) || l.match(/^\s+\?/)) {
+          if (l.match(/^\s+「/) || l.match(/^\s+%/) || l.match(/^\s+;/) || l.match(/^\s+\?/)) {
             insertLine = i + 1;
           }
         }
 
         const insertText = norm
-          ? `    (${reqName}): %${norm} <= 【あてはめ】\n`
-          : `    (${reqName}) <= 【あてはめ】\n`;
+          ? `    「${reqName}」: %${norm} <= 【あてはめ】\n`
+          : `    「${reqName}」 <= 【あてはめ】\n`;
 
         actions.push({
-          title: `(${reqName})を追加`,
+          title: `「${reqName}」を追加`,
           kind: CodeActionKind.QuickFix,
           diagnostics: [diagnostic],
           isPreferred: true,
@@ -1021,13 +986,13 @@ connection.onCodeAction((params: CodeActionParams): CodeAction[] => {
     }
 
     // 2. 閉じ括弧がない場合のクイックフィックス
-    if (diagnostic.message.includes('閉じ括弧') || diagnostic.message.includes(')が見つかりません')) {
-      // 開き括弧(の位置を探す
-      const openBracketIndex = lineText.indexOf('(');
+    if (diagnostic.message.includes('閉じ括弧') || diagnostic.message.includes('」が見つかりません')) {
+      // 開き括弧「の位置を探す
+      const openBracketIndex = lineText.indexOf('「');
       if (openBracketIndex !== -1) {
-        // 行末に)を追加
+        // 行末に」を追加
         actions.push({
-          title: '閉じ括弧)を追加',
+          title: '閉じ括弧「」」を追加',
           kind: CodeActionKind.QuickFix,
           diagnostics: [diagnostic],
           isPreferred: true,
@@ -1038,7 +1003,7 @@ connection.onCodeAction((params: CodeActionParams): CodeAction[] => {
                   start: { line: diagLine, character: lineText.length },
                   end: { line: diagLine, character: lineText.length },
                 },
-                newText: ')',
+                newText: '」',
               }],
             },
           },
@@ -1065,15 +1030,15 @@ connection.onCodeAction((params: CodeActionParams): CodeAction[] => {
           insertText = requirements.map(req => {
             const norm = req.解釈?.[0]?.規範;
             return norm
-              ? `    (${req.範囲}): %${norm} <= 【あてはめ】`
-              : `    (${req.範囲}) <= 【あてはめ】`;
+              ? `    「${req.範囲}」: %${norm} <= 【あてはめ】`
+              : `    「${req.範囲}」 <= 【あてはめ】`;
           }).join('\n') + '\n';
         }
       }
 
       // フォールバック：基本テンプレート
       if (!insertText) {
-        insertText = '    (要件1) <= 【事実をあてはめる】\n    (要件2) <= 【事実をあてはめる】\n';
+        insertText = '    「要件1」 <= 【事実をあてはめる】\n    「要件2」 <= 【事実をあてはめる】\n';
       }
 
       // 行末が : で終わっていない場合は : を追加
@@ -1160,7 +1125,7 @@ connection.onCodeAction((params: CodeActionParams): CodeAction[] => {
 
     // 6. 論点推奨への対応
     if (diagnostic.message.includes('論点') && diagnostic.message.includes('推奨')) {
-      const issueMatch = diagnostic.message.match(/\(([^)]+)\)/);
+      const issueMatch = diagnostic.message.match(/「([^」]+)」/);
       if (issueMatch) {
         const issueName = issueMatch[1];
 
@@ -1189,13 +1154,13 @@ connection.onCodeAction((params: CodeActionParams): CodeAction[] => {
             insertLine = i;
             break;
           }
-          if (l.match(/^\s+\(/) || l.match(/^\s+%/) || l.match(/^\s+\?/) || l.match(/^\s+;/)) {
+          if (l.match(/^\s+「/) || l.match(/^\s+%/) || l.match(/^\s+\?/) || l.match(/^\s+;/)) {
             insertLine = i + 1;
           }
         }
 
         actions.push({
-          title: `論点(${issueName})を追加`,
+          title: `論点「${issueName}」を追加`,
           kind: CodeActionKind.QuickFix,
           diagnostics: [diagnostic],
           edit: {
@@ -1241,7 +1206,7 @@ connection.onCodeAction((params: CodeActionParams): CodeAction[] => {
           break;
         }
         // インデントされた要件行があれば更新
-        if (l.match(/^\s+\(/) || l.match(/^\s+%/) || l.match(/^\s+\?/) || l.match(/^\s+;/)) {
+        if (l.match(/^\s+「/) || l.match(/^\s+%/) || l.match(/^\s+\?/) || l.match(/^\s+;/)) {
           insertLine = i + 1;
         }
       }
@@ -1396,7 +1361,7 @@ connection.languages.semanticTokens.on((params): SemanticTokens => {
     if ((match = /\^([^<=:\s]+)/.exec(line))) {
       builder.push(lineIndex, match.index, match[0].length, tokenTypes.indexOf('type'), 0);
     }
-    if ((match = /\(([^)]+)\)/.exec(line))) {
+    if ((match = /「([^」]+)」/.exec(line))) {
       builder.push(lineIndex, match.index, match[0].length, tokenTypes.indexOf('string'), 0);
     }
     if ((match = /([+!]?)%([^<=:\s@]+)/.exec(line))) {

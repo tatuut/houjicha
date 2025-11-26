@@ -98,7 +98,7 @@
       "patterns": [
         {
           "name": "string.quoted.requirement.houjicha",
-          "match": "[+!]?\\([^)]+\\)",
+          "match": "[+!]?「[^」]+」",
           "captures": {
             "0": { "name": "string.quoted.requirement.houjicha" }
           }
@@ -166,11 +166,11 @@
       "patterns": [
         {
           "name": "keyword.control.conclusion.positive.houjicha",
-          "match": "^\\s*\\+(?=#|\\(|%)"
+          "match": "^\\s*\\+(?=#|「|%)"
         },
         {
           "name": "keyword.control.conclusion.negative.houjicha",
-          "match": "^\\s*!(?=#|\\(|%)"
+          "match": "^\\s*!(?=#|「|%)"
         }
       ]
     },

@@ -120,9 +120,9 @@ export class Parser {
         // 孤立したインデント（主張の外にある要件など）
         this.addError('インデントされた内容は主張（#）または名前空間（::）の内部に記述してください');
         this.skipOrphanedIndentedBlock();
-      } else if (this.check(TokenType.LPAREN)) {
-        // トップレベルの()は許可されない
-        this.addError('要件()は主張（#）の内部に記述してください');
+      } else if (this.check(TokenType.LBRACKET_JP)) {
+        // トップレベルの「」は許可されない
+        this.addError('要件「」は主張（#）の内部に記述してください');
         this.skipUntilNewline();
       } else if (this.check(TokenType.PERCENT)) {
         // トップレベルの%は許可されない
@@ -303,22 +303,22 @@ export class Parser {
       this.advance();
 
       while (!this.isAtEnd() && !this.check(TokenType.DEDENT)) {
-        if (this.check(TokenType.LPAREN)) {
+        if (this.check(TokenType.LBRACKET_JP)) {
           requirements.push(this.parseRequirement());
         } else if (this.check(TokenType.PERCENT) ||
                    this.check(TokenType.DOLLAR) ||
                    (this.check(TokenType.PLUS) && (this.peek(1).type === TokenType.PERCENT || this.peek(1).type === TokenType.DOLLAR)) ||
-                   (this.check(TokenType.PLUS) && this.peek(1).type === TokenType.LPAREN) ||
+                   (this.check(TokenType.PLUS) && this.peek(1).type === TokenType.LBRACKET_JP) ||
                    (this.check(TokenType.EXCLAIM) && (this.peek(1).type === TokenType.PERCENT || this.peek(1).type === TokenType.DOLLAR)) ||
-                   (this.check(TokenType.EXCLAIM) && this.peek(1).type === TokenType.LPAREN)) {
-          // +% or !% or +( or !( or +$ or !$ or $ or %
-          if (this.peek(1).type === TokenType.LPAREN) {
+                   (this.check(TokenType.EXCLAIM) && this.peek(1).type === TokenType.LBRACKET_JP)) {
+          // +% or !% or +「 or !「 or +$ or !$ or $ or %
+          if (this.peek(1).type === TokenType.LBRACKET_JP) {
             requirements.push(this.parseRequirement());
           } else {
             requirements.push(this.parseNormAsRequirement());
           }
         } else if (this.check(TokenType.PLUS) || this.check(TokenType.EXCLAIM)) {
-          // 単独の + or ! の後に % か $ か ( が来る場合
+          // 単独の + or ! の後に % か $ か 「 が来る場合
           requirements.push(this.parseNormAsRequirement());
         } else if (this.check(TokenType.QUESTION)) {
           requirements.push(this.parseIssueAsRequirement());
@@ -498,14 +498,14 @@ export class Parser {
       concluded = 'negative';
     }
 
-    const openBracket = this.expect(TokenType.LPAREN, '要件には(が必要です');
+    const openBracket = this.expect(TokenType.LBRACKET_JP, '要件には「が必要です');
     const openBracketPos = openBracket.range.start;
 
     // 要件名を取得
     let name = '';
     let lastTokenEnd = openBracket.range.end;
     while (!this.isAtEnd() &&
-           !this.check(TokenType.RPAREN) &&
+           !this.check(TokenType.RBRACKET_JP) &&
            !this.check(TokenType.NEWLINE)) {
       const token = this.advance();
       name += token.value;
@@ -514,7 +514,7 @@ export class Parser {
 
     // 閉じ括弧がない場合のエラー（開き括弧の位置でエラーを報告）
     if (this.check(TokenType.NEWLINE) || this.isAtEnd()) {
-      this.addError('閉じ括弧)が見つかりません', {
+      this.addError('閉じ括弧「」」が見つかりません', {
         start: openBracketPos,
         end: lastTokenEnd
       });
@@ -527,7 +527,7 @@ export class Parser {
     const subRequirements: Requirement[] = [];
     const reasonStatements: ReasonStatement[] = [];
 
-    // 行内複合構文: (要件): %規範 <= 事実 または (要件): $定数 <= 事実
+    // 行内複合構文: 「要件」: %規範 <= 事実 または 「要件」: $定数 <= 事実
     if (this.match(TokenType.COLON)) {
       // 規範がある場合（%規範 または $定数参照）
       if (this.check(TokenType.PERCENT) ||
@@ -558,9 +558,9 @@ export class Parser {
             (this.check(TokenType.PLUS) && (this.peek(1).type === TokenType.PERCENT || this.peek(1).type === TokenType.DOLLAR)) ||
             (this.check(TokenType.EXCLAIM) && (this.peek(1).type === TokenType.PERCENT || this.peek(1).type === TokenType.DOLLAR))) {
           subRequirements.push(this.parseNormAsRequirement());
-        } else if (this.check(TokenType.LPAREN) ||
-                   (this.check(TokenType.PLUS) && this.peek(1).type === TokenType.LPAREN) ||
-                   (this.check(TokenType.EXCLAIM) && this.peek(1).type === TokenType.LPAREN)) {
+        } else if (this.check(TokenType.LBRACKET_JP) ||
+                   (this.check(TokenType.PLUS) && this.peek(1).type === TokenType.LBRACKET_JP) ||
+                   (this.check(TokenType.EXCLAIM) && this.peek(1).type === TokenType.LBRACKET_JP)) {
           subRequirements.push(this.parseRequirement());
         } else if (this.check(TokenType.ARROW_LEFT)) {
           // 下位のあてはめ
@@ -616,9 +616,9 @@ export class Parser {
             (this.check(TokenType.PLUS) && (this.peek(1).type === TokenType.PERCENT || this.peek(1).type === TokenType.DOLLAR)) ||
             (this.check(TokenType.EXCLAIM) && (this.peek(1).type === TokenType.PERCENT || this.peek(1).type === TokenType.DOLLAR))) {
           subRequirements.push(this.parseNormAsRequirement());
-        } else if (this.check(TokenType.LPAREN) ||
-                   (this.check(TokenType.PLUS) && this.peek(1).type === TokenType.LPAREN) ||
-                   (this.check(TokenType.EXCLAIM) && this.peek(1).type === TokenType.LPAREN)) {
+        } else if (this.check(TokenType.LBRACKET_JP) ||
+                   (this.check(TokenType.PLUS) && this.peek(1).type === TokenType.LBRACKET_JP) ||
+                   (this.check(TokenType.EXCLAIM) && this.peek(1).type === TokenType.LBRACKET_JP)) {
           subRequirements.push(this.parseRequirement());
         } else if (this.check(TokenType.ARROW_LEFT)) {
           // あてはめを規範に追加
@@ -787,7 +787,7 @@ export class Parser {
       reference = constDef.value.reference;
     } else {
       // 定数が見つからない場合はエラー
-      this.addError(`定数 ${constName} が定義されていません`);
+      this.addError(`定数「${constName}」が定義されていません`);
     }
 
     // あてはめ
