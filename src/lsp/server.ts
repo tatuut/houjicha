@@ -36,6 +36,7 @@ import {
 
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import * as path from 'path';
+import * as fs from 'fs';
 import { URI } from 'vscode-uri';
 import { parse, ParseResult } from '../language/parser';
 import { Document, Claim, Namespace, Requirement, ASTNode } from '../language/ast';
@@ -144,8 +145,38 @@ connection.onExecuteCommand(async (params: ExecuteCommandParams) => {
 
 // ドキュメント変更時の処理
 documents.onDidChangeContent(change => {
+  // DBが空なら、ドキュメントの場所から読み込みを試みる
+  if (articleDatabase.articles.size === 0) {
+    tryLoadDatabaseFromDocument(change.document);
+  }
   validateDocument(change.document);
 });
+
+// ドキュメントの場所から条文データベースを探して読み込む
+function tryLoadDatabaseFromDocument(doc: TextDocument): void {
+  try {
+    const docPath = URI.parse(doc.uri).fsPath;
+    let currentDir = path.dirname(docPath);
+
+    // 親ディレクトリを最大5階層まで探索
+    for (let i = 0; i < 5; i++) {
+      const articlesDir = path.join(currentDir, 'articles');
+      if (fs.existsSync(articlesDir)) {
+        articleDatabase = loadArticleDatabase(currentDir);
+        connection.console.log(`[自動検出] 条文DB読み込み: ${currentDir} (${articleDatabase.articles.size}件)`);
+        return;
+      }
+
+      const parentDir = path.dirname(currentDir);
+      if (parentDir === currentDir) break; // ルートに到達
+      currentDir = parentDir;
+    }
+
+    connection.console.log(`[自動検出] articlesフォルダが見つかりません`);
+  } catch (e) {
+    connection.console.error(`[自動検出] エラー: ${e}`);
+  }
+}
 
 // ドキュメントを検証して診断情報を送信
 async function validateDocument(textDocument: TextDocument): Promise<void> {
