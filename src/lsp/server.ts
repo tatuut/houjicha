@@ -1,5 +1,6 @@
 /**
  * 本件 Matcha - Language Server Protocol サーバー
+ * 条文データベース連携、賢い補完、欠落警告対応版
  */
 
 import {
@@ -26,12 +27,27 @@ import {
   CodeAction,
   CodeActionKind,
   CodeActionParams,
+  ExecuteCommandParams,
+  TextEdit,
+  InsertTextFormat,
 } from 'vscode-languageserver/node';
 
 import { TextDocument } from 'vscode-languageserver-textdocument';
+import * as path from 'path';
+import { URI } from 'vscode-uri';
 import { parse, ParseResult } from '../language/parser';
-import { Document, Claim, Requirement, ASTNode } from '../language/ast';
-import { statuteManager, Statute, StatuteRequirement, parseStatuteKey } from '../language/statute';
+import { Document, Claim, Namespace, Requirement, ASTNode } from '../language/ast';
+import {
+  ArticleDatabase,
+  ArticleData,
+  Annotation,
+  loadArticleDatabase,
+  findArticle,
+  generateTemplate,
+  getRequiredAnnotations,
+  getAllNorms,
+  getIssues,
+} from '../language/loader';
 
 // 接続を作成
 const connection = createConnection(ProposedFeatures.all);
@@ -40,51 +56,87 @@ const documents = new TextDocuments(TextDocument);
 // ドキュメントのパース結果をキャッシュ
 const documentCache = new Map<string, ParseResult>();
 
+// 条文データベース（ワークスペースごと）
+let articleDatabase: ArticleDatabase = {
+  articles: new Map(),
+  nameIndex: new Map(),
+};
+
+// ワークスペースのルートパス
+let workspaceRoot: string | null = null;
+
 // セマンティックトークンの凡例
 const tokenTypes = [
-  'namespace',    // 論述空間
-  'keyword',      // キーワード（#, %, ?, >>）
-  'string',       // 要件名「」
-  'function',     // 規範
-  'variable',     // 定数
-  'comment',      // コメント
-  'operator',     // 演算子
-  'type',         // 根拠条文
-  'parameter',    // 評価
+  'namespace', 'keyword', 'string', 'function', 'variable',
+  'comment', 'operator', 'type', 'parameter',
 ];
 
-const tokenModifiers = [
-  'declaration',
-  'definition',
-  'readonly',
-];
+const tokenModifiers = ['declaration', 'definition', 'readonly'];
 
-const legend: SemanticTokensLegend = {
-  tokenTypes,
-  tokenModifiers,
-};
+const legend: SemanticTokensLegend = { tokenTypes, tokenModifiers };
 
 // 初期化
 connection.onInitialize((params: InitializeParams): InitializeResult => {
+  // ワークスペースのルートを取得
+  if (params.workspaceFolders && params.workspaceFolders.length > 0) {
+    workspaceRoot = URI.parse(params.workspaceFolders[0].uri).fsPath;
+  } else if (params.rootUri) {
+    workspaceRoot = URI.parse(params.rootUri).fsPath;
+  }
+
+  // 条文データベースを読み込み
+  if (workspaceRoot) {
+    try {
+      articleDatabase = loadArticleDatabase(workspaceRoot);
+      connection.console.log(`条文データベース読み込み完了: ${articleDatabase.articles.size}件`);
+    } catch (e) {
+      connection.console.error(`条文データベース読み込みエラー: ${e}`);
+    }
+  }
+
   return {
     capabilities: {
       textDocumentSync: TextDocumentSyncKind.Incremental,
       completionProvider: {
         resolveProvider: true,
-        triggerCharacters: ['#', '%', '「', '^', '@', '$', '?', ':'],
+        triggerCharacters: ['#', '%', '「', '^', '@', '$', '?', ':', '/'],
       },
       hoverProvider: true,
       documentSymbolProvider: true,
       foldingRangeProvider: true,
+      semanticTokensProvider: { legend, full: true },
       codeActionProvider: {
-        codeActionKinds: [CodeActionKind.QuickFix],
+        codeActionKinds: [CodeActionKind.QuickFix, CodeActionKind.Source],
       },
-      semanticTokensProvider: {
-        legend,
-        full: true,
+      executeCommandProvider: {
+        commands: ['matcha.generateTemplate', 'matcha.reloadArticles'],
       },
     },
   };
+});
+
+// 初期化完了後
+connection.onInitialized(() => {
+  connection.console.log('本件 Matcha LSP サーバー起動完了');
+});
+
+// コマンド実行
+connection.onExecuteCommand(async (params: ExecuteCommandParams) => {
+  if (params.command === 'matcha.reloadArticles') {
+    if (workspaceRoot) {
+      articleDatabase = loadArticleDatabase(workspaceRoot);
+      connection.console.log(`条文データベース再読み込み: ${articleDatabase.articles.size}件`);
+    }
+  } else if (params.command === 'matcha.generateTemplate') {
+    const [articleQuery, uri] = params.arguments || [];
+    if (articleQuery && uri) {
+      const article = findArticle(articleDatabase, articleQuery);
+      if (article) {
+        const template = generateTemplate(article);
+        return { template, articleId: article.id };
+      }
+    }
+  }
 });
 
 // ドキュメント変更時の処理
@@ -96,28 +148,19 @@ documents.onDidChangeContent(change => {
 async function validateDocument(textDocument: TextDocument): Promise<void> {
   const text = textDocument.getText();
   const result = parse(text);
-
-  // キャッシュを更新
   documentCache.set(textDocument.uri, result);
 
-  // エラーを診断情報に変換
   const diagnostics: Diagnostic[] = result.errors.map(error => ({
     severity: DiagnosticSeverity.Error,
     range: {
-      start: {
-        line: error.range.start.line,
-        character: error.range.start.column,
-      },
-      end: {
-        line: error.range.end.line,
-        character: error.range.end.column,
-      },
+      start: { line: error.range.start.line, character: error.range.start.column },
+      end: { line: error.range.end.line, character: error.range.end.column },
     },
     message: error.message,
     source: '本件 Matcha',
   }));
 
-  // 追加の検証
+  // 意味的な検証（条文データベースを参照）
   diagnostics.push(...validateSemantics(result.document));
 
   connection.sendDiagnostics({ uri: textDocument.uri, diagnostics });
@@ -127,8 +170,8 @@ async function validateDocument(textDocument: TextDocument): Promise<void> {
 function validateSemantics(doc: Document): Diagnostic[] {
   const diagnostics: Diagnostic[] = [];
 
-  // 主張に要件がない場合の警告
   function checkClaim(claim: Claim): void {
+    // 基本チェック：要件がない
     if (claim.requirements.length === 0 && !claim.fact) {
       diagnostics.push({
         severity: DiagnosticSeverity.Warning,
@@ -142,9 +185,9 @@ function validateSemantics(doc: Document): Diagnostic[] {
     }
 
     // 結論の整合性チェック
-    if (claim.concluded !== undefined) {
+    if (claim.concluded === 'positive') {
       const hasNegativeReq = claim.requirements.some(r => r.concluded === 'negative');
-      if (claim.concluded === 'positive' && hasNegativeReq) {
+      if (hasNegativeReq) {
         diagnostics.push({
           severity: DiagnosticSeverity.Warning,
           range: {
@@ -157,39 +200,63 @@ function validateSemantics(doc: Document): Diagnostic[] {
       }
     }
 
-    // 条文に基づく要件網羅性チェック
-    if (claim.reference) {
-      const statute = findStatuteFromReference(claim.reference.citation);
-      if (statute) {
-        const missingReqs = checkRequirementCoverage(statute, claim.requirements);
-        if (missingReqs.length > 0) {
-          diagnostics.push({
-            severity: DiagnosticSeverity.Information,
-            range: {
-              start: { line: claim.range.start.line, character: claim.range.start.column },
-              end: { line: claim.range.end.line, character: claim.range.end.column },
-            },
-            message: `以下の要件が検討されていません: ${missingReqs.join(', ')}`,
-            source: '本件 Matcha',
-            data: { missingRequirements: missingReqs, statute: statute.name },
-          });
-        }
+    // 条文データベースとの照合：必須要件の欠落チェック
+    const article = findArticleForClaim(claim);
+    if (article) {
+      const requiredAnnotations = getRequiredAnnotations(article);
+      const writtenRequirements = new Set<string>();
 
-        // 書かれざる要件のチェック
-        if (statute.unwrittenRequirements && statute.unwrittenRequirements.length > 0) {
-          const missingUnwritten = checkUnwrittenRequirements(statute, claim.requirements);
-          if (missingUnwritten.length > 0) {
+      // 書かれた要件を収集
+      for (const req of claim.requirements) {
+        writtenRequirements.add(req.name);
+        // 下位要件も収集
+        if (req.subRequirements) {
+          for (const sub of req.subRequirements) {
+            writtenRequirements.add(sub.name);
+          }
+        }
+      }
+
+      // 欠落チェック
+      for (const annotation of requiredAnnotations) {
+        const reqName = annotation.範囲 || annotation.name || '';
+        if (reqName && !writtenRequirements.has(reqName)) {
+          // 部分一致もチェック
+          const found = Array.from(writtenRequirements).some(w =>
+            w.includes(reqName) || reqName.includes(w)
+          );
+          if (!found) {
             diagnostics.push({
-              severity: DiagnosticSeverity.Hint,
+              severity: DiagnosticSeverity.Information,
               range: {
                 start: { line: claim.range.start.line, character: claim.range.start.column },
                 end: { line: claim.range.end.line, character: claim.range.end.column },
               },
-              message: `書かれざる要件の検討: ${missingUnwritten.join(', ')}`,
+              message: `「${reqName}」の検討が見つかりません`,
               source: '本件 Matcha',
-              data: { missingUnwritten, statute: statute.name },
+              data: { missingRequirement: reqName, articleId: article.id },
             });
           }
+        }
+      }
+
+      // 論点の検討漏れチェック
+      const issues = getIssues(article);
+      for (const { issue } of issues) {
+        const hasIssue = claim.requirements.some(req =>
+          req.issue?.question?.includes(issue.問題) ||
+          req.name.includes(issue.問題)
+        );
+        if (!hasIssue && issue.問題) {
+          diagnostics.push({
+            severity: DiagnosticSeverity.Hint,
+            range: {
+              start: { line: claim.range.start.line, character: claim.range.start.column },
+              end: { line: claim.range.end.line, character: claim.range.end.column },
+            },
+            message: `論点「${issue.問題}」の検討を推奨`,
+            source: '本件 Matcha',
+          });
         }
       }
     }
@@ -210,76 +277,16 @@ function validateSemantics(doc: Document): Diagnostic[] {
   return diagnostics;
 }
 
-// 条文参照から条文を検索
-function findStatuteFromReference(citation: string): Statute | undefined {
-  // 条文番号のパターンを試行
-  const patterns = [
-    citation,
-    citation.replace(/第/g, ''),
-    citation.replace(/条$/, ''),
-  ];
-
-  for (const pattern of patterns) {
-    const statute = statuteManager.find(pattern);
-    if (statute) return statute;
+// 主張から条文を特定
+function findArticleForClaim(claim: Claim): ArticleData | undefined {
+  // 根拠条文から検索
+  if (claim.reference?.citation) {
+    const article = findArticle(articleDatabase, claim.reference.citation);
+    if (article) return article;
   }
 
-  // 部分一致検索
-  const results = statuteManager.search(citation);
-  return results[0];
-}
-
-// 要件の網羅性チェック
-function checkRequirementCoverage(statute: Statute, requirements: Requirement[]): string[] {
-  const missing: string[] = [];
-  const reqNames = new Set(requirements.map(r => r.name));
-
-  function checkReq(statuteReq: StatuteRequirement): void {
-    if (statuteReq.required !== false && !reqNames.has(statuteReq.name)) {
-      // 規範名でも探す
-      const foundByNorm = requirements.some(r =>
-        r.norm?.content.includes(statuteReq.name) ||
-        (statuteReq.norm && r.norm?.content.includes(statuteReq.norm))
-      );
-      if (!foundByNorm) {
-        missing.push(statuteReq.name);
-      }
-    }
-    // 下位要件もチェック（ただし親要件が検討されている場合のみ）
-    if (statuteReq.subRequirements && reqNames.has(statuteReq.name)) {
-      for (const subReq of statuteReq.subRequirements) {
-        checkReq(subReq);
-      }
-    }
-  }
-
-  for (const req of statute.requirements) {
-    checkReq(req);
-  }
-
-  return missing;
-}
-
-// 書かれざる要件のチェック
-function checkUnwrittenRequirements(statute: Statute, requirements: Requirement[]): string[] {
-  if (!statute.unwrittenRequirements) return [];
-
-  const missing: string[] = [];
-  const reqNames = new Set(requirements.map(r => r.name));
-
-  for (const unwritten of statute.unwrittenRequirements) {
-    if (!reqNames.has(unwritten.name)) {
-      // 論点として検討されているかチェック
-      const foundAsIssue = requirements.some(r =>
-        r.issue?.norm.content.includes(unwritten.name)
-      );
-      if (!foundAsIssue) {
-        missing.push(unwritten.name);
-      }
-    }
-  }
-
-  return missing;
+  // 主張名から検索
+  return findArticle(articleDatabase, claim.name);
 }
 
 // 補完
@@ -289,159 +296,100 @@ connection.onCompletion((params: TextDocumentPositionParams): CompletionItem[] =
 
   const text = document.getText();
   const offset = document.offsetAt(params.position);
-  const lineText = text.substring(
-    text.lastIndexOf('\n', offset - 1) + 1,
-    offset
-  );
-
+  const lineText = text.substring(text.lastIndexOf('\n', offset - 1) + 1, offset);
   const items: CompletionItem[] = [];
-
-  // 条文データベースから補完候補を生成
-  const allStatutes = statuteManager.getAll();
 
   // # の後：条文データベースから罪名・法的概念
   if (lineText.endsWith('#') || lineText.match(/#\S*$/)) {
-    for (const statute of allStatutes) {
+    // データベースから補完
+    for (const [id, article] of articleDatabase.articles) {
       items.push({
-        label: statute.name,
+        label: article.名称 || id,
         kind: CompletionItemKind.Class,
-        detail: `${statute.law}${statute.article}条${statute.paragraph ? statute.paragraph + '項' : ''}`,
-        documentation: statute.fullText,
-        insertText: `${statute.name}^${statute.law}${statute.article}条${statute.paragraph ? statute.paragraph + '項' : ''}`,
+        detail: id,
+        documentation: article.原文.substring(0, 100) + '...',
       });
+    }
+    // フォールバック
+    if (items.length === 0) {
+      items.push(
+        { label: '窃盗罪', kind: CompletionItemKind.Class, detail: '刑法235条' },
+        { label: '強盗罪', kind: CompletionItemKind.Class, detail: '刑法236条' },
+      );
     }
   }
 
   // ^ の後：条文番号
   if (lineText.endsWith('^') || lineText.match(/\^\S*$/)) {
-    for (const statute of allStatutes) {
-      const citation = `${statute.law}${statute.article}条${statute.paragraph ? statute.paragraph + '項' : ''}`;
+    for (const id of articleDatabase.articles.keys()) {
       items.push({
-        label: citation,
+        label: id,
         kind: CompletionItemKind.Reference,
-        detail: statute.name,
-        documentation: statute.fullText,
+        detail: articleDatabase.articles.get(id)?.名称,
       });
     }
   }
 
-  // % の後：規範のテンプレート（条文データベースから）
+  // % の後：規範（条文データベースから）
   if (lineText.endsWith('%') || lineText.match(/%\S*$/)) {
-    for (const statute of allStatutes) {
-      for (const req of statute.requirements) {
-        if (req.norm) {
+    // 現在の主張を特定して、関連する規範を提案
+    const currentClaim = findCurrentClaim(text, offset);
+    if (currentClaim) {
+      const article = findArticle(articleDatabase, currentClaim);
+      if (article) {
+        const norms = getAllNorms(article);
+        for (const { context, norm } of norms) {
           items.push({
-            label: req.norm,
+            label: norm.規範,
             kind: CompletionItemKind.Function,
-            detail: `${statute.name} - ${req.name}`,
+            detail: context,
+            documentation: norm.出典 ? `出典: ${norm.出典}` : undefined,
           });
-        }
-        // 下位要件の規範も追加
-        if (req.subRequirements) {
-          for (const subReq of req.subRequirements) {
-            if (subReq.norm) {
-              items.push({
-                label: subReq.norm,
-                kind: CompletionItemKind.Function,
-                detail: `${statute.name} - ${subReq.name}`,
-              });
-            }
-          }
-        }
-      }
-      // 書かれざる要件の規範も追加
-      if (statute.unwrittenRequirements) {
-        for (const unwritten of statute.unwrittenRequirements) {
-          if (unwritten.norm) {
-            items.push({
-              label: unwritten.norm,
-              kind: CompletionItemKind.Function,
-              detail: `${statute.name} - ${unwritten.name}（書かれざる要件）`,
-            });
-          }
         }
       }
     }
-  }
-
-  // ? の後：論点テンプレート
-  if (lineText.endsWith('?') || lineText.endsWith('？')) {
-    // 論点になりやすい要件を提案
-    for (const statute of allStatutes) {
-      const collectIssues = (reqs: StatuteRequirement[]): void => {
-        for (const req of reqs) {
-          if (req.isIssue) {
-            items.push({
-              label: req.issueQuestion || `${req.name}の意義`,
-              kind: CompletionItemKind.Snippet,
-              detail: statute.name,
-              insertText: ` ${req.issueQuestion || req.name + 'の意義'} => %${req.norm || req.name}`,
-            });
-          }
-          if (req.subRequirements) {
-            collectIssues(req.subRequirements);
-          }
-        }
-      };
-      collectIssues(statute.requirements);
-      if (statute.unwrittenRequirements) {
-        collectIssues(statute.unwrittenRequirements);
-      }
+    // フォールバック
+    if (items.length === 0) {
+      items.push(
+        { label: '事実の認識・認容', kind: CompletionItemKind.Function, detail: '故意' },
+      );
     }
   }
 
   // 「の後：要件名（条文データベースから）
   if (lineText.endsWith('「')) {
-    for (const statute of allStatutes) {
-      const collectReqNames = (reqs: StatuteRequirement[]): void => {
-        for (const req of reqs) {
-          items.push({
-            label: `${req.name}」`,
-            kind: CompletionItemKind.Property,
-            detail: statute.name,
-            documentation: req.norm,
-          });
-          if (req.subRequirements) {
-            collectReqNames(req.subRequirements);
+    const currentClaim = findCurrentClaim(text, offset);
+    if (currentClaim) {
+      const article = findArticle(articleDatabase, currentClaim);
+      if (article) {
+        for (const annotation of article.アノテーション) {
+          if (annotation.範囲 && annotation.種別 === '要件') {
+            items.push({
+              label: annotation.範囲 + '」',
+              kind: CompletionItemKind.Property,
+              detail: annotation.解釈?.[0]?.規範,
+            });
           }
         }
-      };
-      collectReqNames(statute.requirements);
+      }
     }
   }
 
-  // 現在の主張の根拠条文に基づく要件補完
-  const claimMatch = text.match(/#(\S+)\^([^\s<=:]+)/);
-  if (claimMatch && (lineText.trim() === '' || lineText.match(/^\s+$/))) {
-    const statute = findStatuteFromReference(claimMatch[2]);
-    if (statute) {
-      // 未検討の要件を提案
-      const cached = documentCache.get(params.textDocument.uri);
-      if (cached) {
-        const collectReqs = (reqs: StatuteRequirement[], indent: string = '    '): void => {
-          for (const req of reqs) {
-            items.push({
-              label: `「${req.name}」`,
-              kind: CompletionItemKind.Snippet,
-              detail: '未検討の要件',
-              insertText: req.norm
-                ? `${indent}「${req.name}」: %${req.norm} <= `
-                : `${indent}「${req.name}」 <= `,
-              sortText: '0' + req.name, // 優先表示
-            });
-          }
-        };
-        collectReqs(statute.requirements);
-        if (statute.unwrittenRequirements) {
-          for (const unwritten of statute.unwrittenRequirements) {
-            items.push({
-              label: `? ${unwritten.issueQuestion || unwritten.name}`,
-              kind: CompletionItemKind.Snippet,
-              detail: '書かれざる要件（論点）',
-              insertText: `    ? ${unwritten.issueQuestion || unwritten.name + 'の要否'} => ${unwritten.name}:\n        %${unwritten.norm || ''} <= `,
-              sortText: '1' + unwritten.name,
-            });
-          }
+  // ? の後：論点（条文データベースから）
+  if (lineText.endsWith('?') || lineText.endsWith('？')) {
+    const currentClaim = findCurrentClaim(text, offset);
+    if (currentClaim) {
+      const article = findArticle(articleDatabase, currentClaim);
+      if (article) {
+        const issues = getIssues(article);
+        for (const { issue } of issues) {
+          const norm = issue.解釈[0]?.規範 || '';
+          items.push({
+            label: ` ${issue.理由 || issue.問題} => %${norm}`,
+            kind: CompletionItemKind.Snippet,
+            detail: issue.問題,
+            insertTextFormat: InsertTextFormat.Snippet,
+          });
         }
       }
     }
@@ -455,6 +403,19 @@ connection.onCompletion((params: TextDocumentPositionParams): CompletionItem[] =
       { label: '設問1', kind: CompletionItemKind.Module },
       { label: '設問2', kind: CompletionItemKind.Module },
     );
+  }
+
+  // /gen: テンプレート生成
+  if (lineText.match(/\/gen\s*$/)) {
+    for (const [id, article] of articleDatabase.articles) {
+      items.push({
+        label: `生成: ${article.名称 || id}`,
+        kind: CompletionItemKind.Snippet,
+        insertText: generateTemplate(article),
+        detail: 'テンプレートを生成',
+        documentation: article.原文.substring(0, 100),
+      });
+    }
   }
 
   // $ の後：定義済み定数
@@ -474,19 +435,33 @@ connection.onCompletion((params: TextDocumentPositionParams): CompletionItem[] =
   // 行頭での補完
   if (lineText.trim() === '') {
     items.push(
-      { label: '#', kind: CompletionItemKind.Keyword, detail: '主張', insertText: '#' },
-      { label: '::', kind: CompletionItemKind.Keyword, detail: '論述空間', insertText: '::' },
-      { label: '「', kind: CompletionItemKind.Keyword, detail: '要件', insertText: '「' },
-      { label: '%', kind: CompletionItemKind.Keyword, detail: '規範', insertText: '%' },
-      { label: '?', kind: CompletionItemKind.Keyword, detail: '論点', insertText: '?' },
-      { label: '>>', kind: CompletionItemKind.Keyword, detail: '効果', insertText: '>>' },
-      { label: '+', kind: CompletionItemKind.Keyword, detail: '該当', insertText: '+' },
-      { label: '!', kind: CompletionItemKind.Keyword, detail: '否定', insertText: '!' },
+      { label: '#', kind: CompletionItemKind.Keyword, detail: '主張' },
+      { label: '::', kind: CompletionItemKind.Keyword, detail: '論述空間' },
+      { label: '「', kind: CompletionItemKind.Keyword, detail: '要件' },
+      { label: '%', kind: CompletionItemKind.Keyword, detail: '規範' },
+      { label: '?', kind: CompletionItemKind.Keyword, detail: '論点' },
+      { label: '>>', kind: CompletionItemKind.Keyword, detail: '効果' },
+      { label: '/gen', kind: CompletionItemKind.Keyword, detail: 'テンプレート生成' },
     );
   }
 
   return items;
 });
+
+// 現在の主張を特定
+function findCurrentClaim(text: string, offset: number): string | null {
+  const beforeCursor = text.substring(0, offset);
+  const lines = beforeCursor.split('\n');
+
+  // 後ろから走査して #主張 を探す
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const match = lines[i].match(/#([^\^<=:\s]+)/);
+    if (match) {
+      return match[1];
+    }
+  }
+  return null;
+}
 
 // 補完アイテムの詳細
 connection.onCompletionResolve((item: CompletionItem): CompletionItem => {
@@ -498,166 +473,59 @@ connection.onHover((params: TextDocumentPositionParams): Hover | null => {
   const document = documents.get(params.textDocument.uri);
   if (!document) return null;
 
-  const cached = documentCache.get(params.textDocument.uri);
-  if (!cached) return null;
-
   const position = params.position;
   const text = document.getText();
   const lines = text.split('\n');
   const line = lines[position.line] || '';
 
-  // 条文参照のホバー（^の後の条文番号）
-  const refMatch = line.match(/\^([^\s<=:]+)/);
-  if (refMatch) {
-    const refStart = line.indexOf(refMatch[0]);
-    const refEnd = refStart + refMatch[0].length;
-    if (position.character >= refStart && position.character <= refEnd) {
-      const statute = findStatuteFromReference(refMatch[1]);
-      if (statute) {
-        let content = `## ${statute.law}${statute.article}条`;
-        if (statute.paragraph) content += `${statute.paragraph}項`;
-        content += ` - ${statute.name}\n\n`;
-        if (statute.fullText) {
-          content += `> ${statute.fullText}\n\n`;
-        }
-        content += `### 要件\n`;
-        const formatReqs = (reqs: StatuteRequirement[], indent: string = ''): string => {
-          let result = '';
-          for (const req of reqs) {
-            result += `${indent}- **${req.name}**`;
-            if (req.norm) result += `: ${req.norm}`;
-            if (req.isIssue) result += ' ⚠️論点';
-            result += '\n';
-            if (req.subRequirements) {
-              result += formatReqs(req.subRequirements, indent + '  ');
-            }
-          }
-          return result;
-        };
-        content += formatReqs(statute.requirements);
-        if (statute.unwrittenRequirements && statute.unwrittenRequirements.length > 0) {
-          content += `\n### 書かれざる要件\n`;
-          content += formatReqs(statute.unwrittenRequirements);
-        }
-        content += `\n### 効果\n${statute.effect.content}`;
-        return {
-          contents: {
-            kind: MarkupKind.Markdown,
-            value: content,
-          },
-        };
-      }
+  // 主張名のホバー：条文情報を表示
+  const claimMatch = line.match(/#([^\^<=:\s]+)/);
+  if (claimMatch) {
+    const claimName = claimMatch[1];
+    const article = findArticle(articleDatabase, claimName);
+    if (article) {
+      return {
+        contents: {
+          kind: MarkupKind.Markdown,
+          value: `## ${article.名称 || article.id}\n\n### 条文\n\`\`\`\n${article.原文}\`\`\`\n\n### 要件\n${article.アノテーション
+            .filter(a => a.種別 === '要件' && a.範囲)
+            .map(a => `- 「${a.範囲}」`)
+            .join('\n')}`,
+        },
+      };
     }
   }
 
-  // 要件名のホバー（「」内）
-  const reqMatch = line.match(/「([^」]+)」/);
-  if (reqMatch) {
-    const reqStart = line.indexOf(reqMatch[0]);
-    const reqEnd = reqStart + reqMatch[0].length;
-    if (position.character >= reqStart && position.character <= reqEnd) {
-      const reqName = reqMatch[1];
-      // 条文データベースから該当する要件を検索
-      for (const statute of statuteManager.getAll()) {
-        const findReq = (reqs: StatuteRequirement[]): StatuteRequirement | undefined => {
-          for (const req of reqs) {
-            if (req.name === reqName) return req;
-            if (req.subRequirements) {
-              const found = findReq(req.subRequirements);
-              if (found) return found;
-            }
-          }
-          return undefined;
-        };
-        const foundReq = findReq(statute.requirements);
-        if (foundReq) {
-          let content = `## 「${foundReq.name}」\n\n`;
-          content += `**条文**: ${statute.law}${statute.article}条 - ${statute.name}\n\n`;
-          if (foundReq.norm) {
-            content += `**規範**: ${foundReq.norm}\n\n`;
-          }
-          if (foundReq.isIssue) {
-            content += `⚠️ **論点になりやすい要件**\n`;
-            if (foundReq.issueQuestion) {
-              content += `問題提起: ${foundReq.issueQuestion}\n`;
-            }
-          }
-          return {
-            contents: {
-              kind: MarkupKind.Markdown,
-              value: content,
-            },
-          };
-        }
-      }
+  // 根拠条文のホバー
+  const refMatch = line.match(/\^([^\s<=:]+)/);
+  if (refMatch) {
+    const ref = refMatch[1];
+    const article = findArticle(articleDatabase, ref);
+    if (article) {
+      return {
+        contents: {
+          kind: MarkupKind.Markdown,
+          value: `## ${article.id}\n\n\`\`\`\n${article.原文}\`\`\``,
+        },
+      };
     }
   }
 
   // 記号のホバー情報
   const hoverInfo: { [key: string]: { title: string; description: string } } = {
-    '#': {
-      title: '主張（Claim）',
-      description: '法的主張を示します。根拠条文（^）と事実へのあてはめ（<=）を続けて記述します。\n\n例: `#窃盗罪^刑法235条 <= 甲の行為`',
-    },
-    '%': {
-      title: '規範（Norm）',
-      description: '法的規範・解釈を示します。条文の文言を法的概念として定義します。\n\n例: `%占有者の意思に反して占有を移転`',
-    },
-    '「': {
-      title: '要件（Requirement）',
-      description: '条文の構成要件を示します。「」で囲んで記述します。\n\n例: `「他人の財物」`',
-    },
-    '?': {
-      title: '論点（Issue）',
-      description: '法的論点を提起します。理由（~>）と規範（=>）を続けて記述できます。\n\n例: `? 意義 ~> 趣旨 => %規範`',
-    },
-    '>>': {
-      title: '効果（Effect）',
-      description: '法的効果・結論を示します。\n\n例: `>> 甲に窃盗罪が成立する`',
-    },
-    '<=': {
-      title: 'あてはめ（Application）',
-      description: '事実を法的概念にあてはめます。\n\n例: `<= 本件財布はAが所有する`',
-    },
-    '@': {
-      title: '評価（Evaluation）',
-      description: '事実に対する法的評価を示します。\n\n例: `甲@占有者`',
-    },
-    '^': {
-      title: '根拠条文（Reference）',
-      description: '主張や規範の根拠となる条文を示します。\n\n例: `^刑法235条`',
-    },
-    '::': {
-      title: '論述空間（Namespace）',
-      description: '答案構成上の分類を示します。\n\n例: `::甲の罪責`',
-    },
-    '+': {
-      title: '該当（Positive Conclusion）',
-      description: '要件に該当することを示します。',
-    },
-    '!': {
-      title: '否定（Negative Conclusion）',
-      description: '要件に該当しないことを示します。',
-    },
-    '~>': {
-      title: '理由（Reason）',
-      description: '論点における規範定立の理由を示します。',
-    },
-    '=>': {
-      title: '帰結（Implies）',
-      description: '論点から規範への帰結を示します。',
-    },
-    'as': {
-      title: '定数定義（Constant Definition）',
-      description: '規範を定数として定義し、後から参照できるようにします。\n\n例: `as 第三者の規範`',
-    },
-    '$': {
-      title: '定数参照（Constant Reference）',
-      description: '定義済みの定数を参照します。\n\n例: `$第三者の規範`',
-    },
+    '#': { title: '主張（Claim）', description: '法的主張を示します。' },
+    '%': { title: '規範（Norm）', description: '法的規範・解釈を示します。' },
+    '「': { title: '要件（Requirement）', description: '条文の構成要件を示します。' },
+    '?': { title: '論点（Issue）', description: '法的論点を提起します。' },
+    '>>': { title: '効果（Effect）', description: '法的効果・結論を示します。' },
+    '<=': { title: 'あてはめ（Application）', description: '事実を法的概念にあてはめます。' },
+    '@': { title: '評価（Evaluation）', description: '事実に対する法的評価を示します。' },
+    '^': { title: '根拠条文（Reference）', description: '根拠となる条文を示します。' },
+    '::': { title: '論述空間（Namespace）', description: '答案構成上の分類を示します。' },
+    '+': { title: '該当', description: '要件に該当することを示します。' },
+    '!': { title: '否定', description: '要件に該当しないことを示します。' },
   };
 
-  // カーソル位置の記号を特定
   for (const [symbol, info] of Object.entries(hoverInfo)) {
     const idx = line.indexOf(symbol);
     if (idx !== -1 && position.character >= idx && position.character <= idx + symbol.length) {
@@ -673,56 +541,45 @@ connection.onHover((params: TextDocumentPositionParams): Hover | null => {
   return null;
 });
 
-// コードアクション（クイックフィックス）
+// コードアクション
 connection.onCodeAction((params: CodeActionParams): CodeAction[] => {
   const actions: CodeAction[] = [];
   const document = documents.get(params.textDocument.uri);
   if (!document) return actions;
 
   for (const diagnostic of params.context.diagnostics) {
-    if (diagnostic.data && (diagnostic.data as any).missingRequirements) {
-      const missing = (diagnostic.data as any).missingRequirements as string[];
-      const statute = (diagnostic.data as any).statute as string;
+    // 欠落要件の追加アクション
+    if (diagnostic.data?.missingRequirement) {
+      const reqName = diagnostic.data.missingRequirement;
+      const articleId = diagnostic.data.articleId;
+      const article = articleDatabase.articles.get(articleId);
 
-      // 不足している要件を追加するアクション
-      actions.push({
-        title: `不足要件を追加: ${missing.join(', ')}`,
-        kind: CodeActionKind.QuickFix,
-        diagnostics: [diagnostic],
-        edit: {
-          changes: {
-            [params.textDocument.uri]: [{
-              range: {
-                start: { line: diagnostic.range.end.line, character: 0 },
-                end: { line: diagnostic.range.end.line, character: 0 },
-              },
-              newText: missing.map(req => `    「${req}」 <= \n`).join(''),
-            }],
+      if (article) {
+        const annotation = article.アノテーション.find(
+          (a: Annotation) => a.範囲 === reqName || a.name === reqName
+        );
+        const norm = annotation?.解釈?.[0]?.規範;
+        const insertText = norm
+          ? `    「${reqName}」: %${norm} <= 【あてはめ】\n`
+          : `    「${reqName}」 <= 【あてはめ】\n`;
+
+        actions.push({
+          title: `「${reqName}」を追加`,
+          kind: CodeActionKind.QuickFix,
+          diagnostics: [diagnostic],
+          edit: {
+            changes: {
+              [params.textDocument.uri]: [{
+                range: {
+                  start: { line: diagnostic.range.end.line, character: 0 },
+                  end: { line: diagnostic.range.end.line, character: 0 },
+                },
+                newText: insertText,
+              }],
+            },
           },
-        },
-      });
-    }
-
-    if (diagnostic.data && (diagnostic.data as any).missingUnwritten) {
-      const missing = (diagnostic.data as any).missingUnwritten as string[];
-
-      // 書かれざる要件を論点として追加するアクション
-      actions.push({
-        title: `書かれざる要件を論点として追加: ${missing.join(', ')}`,
-        kind: CodeActionKind.QuickFix,
-        diagnostics: [diagnostic],
-        edit: {
-          changes: {
-            [params.textDocument.uri]: [{
-              range: {
-                start: { line: diagnostic.range.end.line, character: 0 },
-                end: { line: diagnostic.range.end.line, character: 0 },
-              },
-              newText: missing.map(req => `    ? ${req}の要否 => ${req}:\n        % <= \n`).join(''),
-            }],
-          },
-        },
-      });
+        });
+      }
     }
   }
 
@@ -763,12 +620,7 @@ connection.onDocumentSymbol((params): DocumentSymbol[] => {
       if (req.subRequirements) {
         children.push(...processRequirements(req.subRequirements));
       }
-      return createSymbol(
-        req.name,
-        SymbolKind.Property,
-        req.range,
-        children.length > 0 ? children : undefined
-      );
+      return createSymbol(req.name, SymbolKind.Property, req.range, children.length > 0 ? children : undefined);
     });
   }
 
@@ -776,18 +628,9 @@ connection.onDocumentSymbol((params): DocumentSymbol[] => {
     const prefix = claim.concluded === 'positive' ? '+' : claim.concluded === 'negative' ? '!' : '';
     const children = processRequirements(claim.requirements);
     if (claim.effect) {
-      children.push(createSymbol(
-        claim.effect.content,
-        SymbolKind.Event,
-        claim.effect.range
-      ));
+      children.push(createSymbol(claim.effect.content, SymbolKind.Event, claim.effect.range));
     }
-    return createSymbol(
-      `${prefix}#${claim.name}`,
-      SymbolKind.Class,
-      claim.range,
-      children.length > 0 ? children : undefined
-    );
+    return createSymbol(`${prefix}#${claim.name}`, SymbolKind.Class, claim.range, children.length > 0 ? children : undefined);
   }
 
   for (const child of cached.document.children) {
@@ -798,12 +641,7 @@ connection.onDocumentSymbol((params): DocumentSymbol[] => {
           nsChildren.push(processClaim(nsChild));
         }
       }
-      symbols.push(createSymbol(
-        `::${child.name}`,
-        SymbolKind.Namespace,
-        child.range,
-        nsChildren.length > 0 ? nsChildren : undefined
-      ));
+      symbols.push(createSymbol(`::${child.name}`, SymbolKind.Namespace, child.range, nsChildren.length > 0 ? nsChildren : undefined));
     } else if (child.type === 'Claim') {
       symbols.push(processClaim(child));
     }
@@ -850,54 +688,35 @@ connection.languages.semanticTokens.on((params): SemanticTokens => {
   const document = documents.get(params.textDocument.uri);
   if (!document) return { data: [] };
 
-  const cached = documentCache.get(params.textDocument.uri);
-  if (!cached) return { data: [] };
-
   const builder = new SemanticTokensBuilder();
   const text = document.getText();
   const lines = text.split('\n');
 
-  // 簡易的なトークン化（より詳細な実装は lexer の結果を使用）
   lines.forEach((line, lineIndex) => {
     let match: RegExpExecArray | null;
 
-    // 論述空間
     if ((match = /^(\s*)(::)(.*)/.exec(line))) {
       builder.push(lineIndex, match[1].length, 2, tokenTypes.indexOf('keyword'), 0);
       builder.push(lineIndex, match[1].length + 2, match[3].length, tokenTypes.indexOf('namespace'), 0);
     }
-
-    // コメント
     if ((match = /\/\/(.*)/.exec(line))) {
       builder.push(lineIndex, match.index, match[0].length, tokenTypes.indexOf('comment'), 0);
     }
-
-    // 主張
     if ((match = /([+!]?)#([^\\^<=:]+)/.exec(line))) {
       builder.push(lineIndex, match.index, match[0].length, tokenTypes.indexOf('keyword'), 0);
     }
-
-    // 根拠条文
     if ((match = /\^([^<=:\s]+)/.exec(line))) {
       builder.push(lineIndex, match.index, match[0].length, tokenTypes.indexOf('type'), 0);
     }
-
-    // 要件
     if ((match = /「([^」]+)」/.exec(line))) {
       builder.push(lineIndex, match.index, match[0].length, tokenTypes.indexOf('string'), 0);
     }
-
-    // 規範
     if ((match = /([+!]?)%([^<=:\s@]+)/.exec(line))) {
       builder.push(lineIndex, match.index, match[0].length, tokenTypes.indexOf('function'), 0);
     }
-
-    // 評価
     if ((match = /@([^\s&|)]+)/.exec(line))) {
       builder.push(lineIndex, match.index, match[0].length, tokenTypes.indexOf('parameter'), 0);
     }
-
-    // 定数
     if ((match = /\$([^\s<=:]+)/.exec(line))) {
       builder.push(lineIndex, match.index, match[0].length, tokenTypes.indexOf('variable'), 0);
     }
