@@ -662,6 +662,11 @@ export class Parser {
       concluded = 'negative';
     }
 
+    // $定数参照の場合
+    if (this.match(TokenType.DOLLAR)) {
+      return this.parseConstantReference(startPos, concluded);
+    }
+
     this.expect(TokenType.PERCENT, '規範には % が必要です');
 
     // 規範内容を取得
@@ -741,6 +746,52 @@ export class Parser {
       subNorm,
       fact,
       constantDefinition,
+      range: this.createRange(startPos, endPos)
+    };
+  }
+
+  // ===== 定数参照解析 =====
+
+  private parseConstantReference(startPos: Position, concluded?: 'positive' | 'negative'): Norm {
+    // 定数名を取得
+    let constName = '';
+    while (!this.isAtEnd() &&
+           !this.check(TokenType.ARROW_LEFT) &&
+           !this.check(TokenType.COLON) &&
+           !this.check(TokenType.SEMICOLON) &&
+           !this.check(TokenType.NEWLINE)) {
+      constName += this.advance().value + ' ';
+    }
+    constName = constName.trim();
+
+    // 定数を検索して展開
+    const constDef = this.constants.get(constName);
+    let content = constName;
+    let reference: Reference | undefined;
+
+    if (constDef) {
+      // 定数が見つかった場合、その内容を使用
+      content = constDef.value.content;
+      reference = constDef.value.reference;
+    } else {
+      // 定数が見つからない場合はエラー
+      this.addError(`定数「${constName}」が定義されていません`);
+    }
+
+    // あてはめ
+    let fact: Fact | undefined;
+    if (this.match(TokenType.ARROW_LEFT)) {
+      fact = this.parseFact();
+    }
+
+    const endPos = this.peek().range.start;
+    return {
+      type: 'Norm',
+      concluded,
+      content,
+      reference,
+      fact,
+      constantReference: constName, // 参照元の定数名を保持
       range: this.createRange(startPos, endPos)
     };
   }

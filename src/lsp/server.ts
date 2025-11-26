@@ -339,11 +339,24 @@ connection.onCompletion((params: TextDocumentPositionParams): CompletionItem[] =
       if (article) {
         const norms = getAllNorms(article);
         for (const { context, norm } of norms) {
+          // Markdown形式の詳細説明を構築
+          let docContent = `### ${norm.規範}\n\n`;
+          if (norm.出典) {
+            docContent += `**出典**: ${norm.出典}\n\n`;
+          }
+          if (norm.説明) {
+            docContent += `${norm.説明}\n\n`;
+          }
+          docContent += `**文脈**: ${context}`;
+
           items.push({
             label: norm.規範,
             kind: CompletionItemKind.Function,
-            detail: context,
-            documentation: norm.出典 ? `出典: ${norm.出典}` : undefined,
+            detail: `${context}${norm.出典 ? ` (${norm.出典})` : ''}`,
+            documentation: {
+              kind: MarkupKind.Markdown,
+              value: docContent,
+            },
           });
         }
       }
@@ -364,10 +377,55 @@ connection.onCompletion((params: TextDocumentPositionParams): CompletionItem[] =
       if (article) {
         for (const annotation of article.アノテーション) {
           if (annotation.範囲 && annotation.種別 === '要件') {
+            // Markdown形式の詳細説明を構築
+            let docContent = `## 「${annotation.範囲}」\n\n`;
+
+            // 規範
+            if (annotation.解釈 && annotation.解釈.length > 0) {
+              docContent += `### 規範\n`;
+              for (const interp of annotation.解釈) {
+                docContent += `- **${interp.規範}**`;
+                if (interp.出典) docContent += ` (${interp.出典})`;
+                docContent += '\n';
+                if (interp.説明) docContent += `  - ${interp.説明}\n`;
+              }
+              docContent += '\n';
+            }
+
+            // 下位要件
+            if (annotation.下位要件 && annotation.下位要件.length > 0) {
+              docContent += `### 下位要件\n`;
+              for (const sub of annotation.下位要件) {
+                docContent += `- **${sub.name}**`;
+                if (sub.規範) docContent += `: ${sub.規範}`;
+                docContent += '\n';
+              }
+              docContent += '\n';
+            }
+
+            // 関連論点
+            if (annotation.論点 && annotation.論点.length > 0) {
+              docContent += `### 関連論点\n`;
+              for (const issue of annotation.論点) {
+                docContent += `- **${issue.問題}**`;
+                if (issue.理由) docContent += `: ${issue.理由}`;
+                docContent += '\n';
+              }
+            }
+
             items.push({
               label: annotation.範囲 + '」',
               kind: CompletionItemKind.Property,
-              detail: annotation.解釈?.[0]?.規範,
+              detail: annotation.解釈?.[0]?.規範 || '構成要件',
+              documentation: {
+                kind: MarkupKind.Markdown,
+                value: docContent,
+              },
+              // 補完後のスニペット（規範があれば行内複合構文を提案）
+              insertText: annotation.解釈?.[0]?.規範
+                ? `${annotation.範囲}」: %${annotation.解釈[0].規範} <= `
+                : `${annotation.範囲}」 <= `,
+              insertTextFormat: InsertTextFormat.PlainText,
             });
           }
         }
@@ -382,13 +440,36 @@ connection.onCompletion((params: TextDocumentPositionParams): CompletionItem[] =
       const article = findArticle(articleDatabase, currentClaim);
       if (article) {
         const issues = getIssues(article);
-        for (const { issue } of issues) {
+        for (const { annotation, issue } of issues) {
           const norm = issue.解釈[0]?.規範 || '';
+
+          // Markdown形式の詳細説明を構築
+          let docContent = `## 論点: ${issue.問題}\n\n`;
+          if (issue.理由) {
+            docContent += `**問題の所在**: ${issue.理由}\n\n`;
+          }
+          if (annotation.範囲) {
+            docContent += `**関連要件**: 「${annotation.範囲}」\n\n`;
+          }
+
+          docContent += `### 学説・判例\n`;
+          for (const interp of issue.解釈) {
+            docContent += `- **${interp.規範}**`;
+            if (interp.出典) docContent += ` (${interp.出典})`;
+            docContent += '\n';
+            if (interp.説明) docContent += `  - ${interp.説明}\n`;
+          }
+
           items.push({
-            label: ` ${issue.理由 || issue.問題} => %${norm}`,
+            label: ` ${issue.問題} ~> ${issue.理由 || '【理由】'} => %${norm}`,
             kind: CompletionItemKind.Snippet,
-            detail: issue.問題,
-            insertTextFormat: InsertTextFormat.Snippet,
+            detail: `論点: ${issue.問題}`,
+            documentation: {
+              kind: MarkupKind.Markdown,
+              value: docContent,
+            },
+            insertText: ` ${issue.問題} ~> ${issue.理由 || '【理由】'} => %${norm}`,
+            insertTextFormat: InsertTextFormat.PlainText,
           });
         }
       }
@@ -478,21 +559,121 @@ connection.onHover((params: TextDocumentPositionParams): Hover | null => {
   const lines = text.split('\n');
   const line = lines[position.line] || '';
 
+  // カーソル位置の前後を取得して、より正確なコンテキストを把握
+  const currentClaim = findCurrentClaim(text, document.offsetAt(position));
+
+  // 要件「」のホバー：詳細情報を表示
+  const reqMatch = line.match(/「([^」]+)」/);
+  if (reqMatch) {
+    const reqName = reqMatch[1];
+    const reqIndex = line.indexOf(reqMatch[0]);
+    // カーソルが要件名の上にあるか確認
+    if (position.character >= reqIndex && position.character <= reqIndex + reqMatch[0].length) {
+      const article = currentClaim ? findArticle(articleDatabase, currentClaim) : null;
+      if (article) {
+        const annotation = article.アノテーション.find(
+          a => a.範囲 === reqName || a.name === reqName
+        );
+        if (annotation) {
+          let content = `## 「${reqName}」\n\n`;
+
+          // 規範
+          if (annotation.解釈 && annotation.解釈.length > 0) {
+            content += `### 規範\n`;
+            for (const interp of annotation.解釈) {
+              content += `- **${interp.規範}**`;
+              if (interp.出典) content += ` _(${interp.出典})_`;
+              content += '\n';
+              if (interp.説明) content += `  > ${interp.説明}\n`;
+            }
+            content += '\n';
+          }
+
+          // 下位要件
+          if (annotation.下位要件 && annotation.下位要件.length > 0) {
+            content += `### 下位要件\n`;
+            for (const sub of annotation.下位要件) {
+              content += `- **${sub.name}**`;
+              if (sub.規範) content += `: ${sub.規範}`;
+              content += '\n';
+            }
+            content += '\n';
+          }
+
+          // 論点
+          if (annotation.論点 && annotation.論点.length > 0) {
+            content += `### 関連論点\n`;
+            for (const issue of annotation.論点) {
+              content += `#### ${issue.問題}\n`;
+              if (issue.理由) content += `_${issue.理由}_\n\n`;
+              for (const interp of issue.解釈) {
+                content += `- ${interp.規範}`;
+                if (interp.出典) content += ` _(${interp.出典})_`;
+                content += '\n';
+              }
+            }
+          }
+
+          return { contents: { kind: MarkupKind.Markdown, value: content } };
+        }
+      }
+    }
+  }
+
+  // 規範%のホバー：詳細情報を表示
+  const normMatch = line.match(/%([^\s<=:@]+)/);
+  if (normMatch) {
+    const normText = normMatch[1];
+    const normIndex = line.indexOf(normMatch[0]);
+    if (position.character >= normIndex && position.character <= normIndex + normMatch[0].length) {
+      const article = currentClaim ? findArticle(articleDatabase, currentClaim) : null;
+      if (article) {
+        const norms = getAllNorms(article);
+        const found = norms.find(n => n.norm.規範.includes(normText) || normText.includes(n.norm.規範));
+        if (found) {
+          let content = `## 規範\n\n`;
+          content += `**${found.norm.規範}**\n\n`;
+          if (found.norm.出典) content += `**出典**: ${found.norm.出典}\n\n`;
+          if (found.norm.説明) content += `${found.norm.説明}\n\n`;
+          content += `**文脈**: ${found.context}`;
+          return { contents: { kind: MarkupKind.Markdown, value: content } };
+        }
+      }
+    }
+  }
+
   // 主張名のホバー：条文情報を表示
   const claimMatch = line.match(/#([^\^<=:\s]+)/);
   if (claimMatch) {
     const claimName = claimMatch[1];
-    const article = findArticle(articleDatabase, claimName);
-    if (article) {
-      return {
-        contents: {
-          kind: MarkupKind.Markdown,
-          value: `## ${article.名称 || article.id}\n\n### 条文\n\`\`\`\n${article.原文}\`\`\`\n\n### 要件\n${article.アノテーション
-            .filter(a => a.種別 === '要件' && a.範囲)
-            .map(a => `- 「${a.範囲}」`)
-            .join('\n')}`,
-        },
-      };
+    const claimIndex = line.indexOf(claimMatch[0]);
+    if (position.character >= claimIndex && position.character <= claimIndex + claimMatch[0].length) {
+      const article = findArticle(articleDatabase, claimName);
+      if (article) {
+        let content = `## ${article.名称 || article.id}\n\n`;
+        content += `### 条文\n\`\`\`\n${article.原文}\`\`\`\n\n`;
+
+        content += `### 要件\n`;
+        for (const a of article.アノテーション.filter(a => a.種別 === '要件')) {
+          const name = a.範囲 || a.name || '';
+          content += `- **「${name}」**`;
+          if (a.解釈?.[0]?.規範) content += `: ${a.解釈[0].規範}`;
+          content += '\n';
+        }
+
+        // 論点
+        const issues = getIssues(article);
+        if (issues.length > 0) {
+          content += `\n### 論点\n`;
+          for (const { issue } of issues) {
+            content += `- **${issue.問題}**`;
+            if (issue.理由) content += `: ${issue.理由}`;
+            content += '\n';
+          }
+        }
+
+        return { contents: { kind: MarkupKind.Markdown, value: content } };
+      }
     }
   }
 
@@ -500,14 +681,17 @@ connection.onHover((params: TextDocumentPositionParams): Hover | null => {
   const refMatch = line.match(/\^([^\s<=:]+)/);
   if (refMatch) {
     const ref = refMatch[1];
-    const article = findArticle(articleDatabase, ref);
-    if (article) {
-      return {
-        contents: {
-          kind: MarkupKind.Markdown,
-          value: `## ${article.id}\n\n\`\`\`\n${article.原文}\`\`\``,
-        },
-      };
+    const refIndex = line.indexOf(refMatch[0]);
+    if (position.character >= refIndex && position.character <= refIndex + refMatch[0].length) {
+      const article = findArticle(articleDatabase, ref);
+      if (article) {
+        return {
+          contents: {
+            kind: MarkupKind.Markdown,
+            value: `## ${article.id}（${article.名称 || ''}）\n\n\`\`\`\n${article.原文}\`\`\``,
+          },
+        };
+      }
     }
   }
 

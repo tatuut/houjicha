@@ -105,7 +105,8 @@ export interface Norm extends BaseNode {
   subNorm?: Norm;
   fact?: Fact;
   subRequirements?: Requirement[];
-  constantDefinition?: string;
+  constantDefinition?: string;  // as で定義した場合の定数名
+  constantReference?: string;   // $ で参照した場合の定数名
 }
 
 /**
