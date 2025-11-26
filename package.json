@@ -35,7 +35,20 @@
         "scopeName": "source.matcha",
         "path": "./syntaxes/matcha.tmLanguage.json"
       }
-    ]
+    ],
+    "configurationDefaults": {
+      "[matcha]": {
+        "editor.wordBasedSuggestions": "off",
+        "editor.suggest.showWords": false,
+        "editor.quickSuggestions": {
+          "other": true,
+          "comments": false,
+          "strings": true
+        },
+        "editor.suggestSelection": "first",
+        "editor.acceptSuggestionOnEnter": "on"
+      }
+    }
   },
   "scripts": {
     "build": "tsc",

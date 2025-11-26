@@ -8,7 +8,9 @@
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(npx vsce package --allow-missing-repository)",
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "Bash(code --install-extension:*)",
+      "Bash(code --list-extensions)"
     ],
     "deny": [],
     "ask": []
