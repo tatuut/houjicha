@@ -567,16 +567,19 @@ connection.onCodeAction((params: CodeActionParams): CodeAction[] => {
         const norm = annotation?.解釈?.[0]?.規範;
 
         // 挿入位置を探す（主張の最後の要件の後、または効果の前）
+        // コメント行は無視する
         let insertLine = diagnostic.range.end.line;
         for (let i = diagLine + 1; i < lines.length; i++) {
           const l = lines[i];
+          // コメント行はスキップ
+          if (l.match(/^\s*\/\//)) continue;
           // 次の主張や名前空間、効果が来たら終了
           if (l.match(/^\s*#/) || l.match(/^\s*::/) || l.match(/^\s*>>/)) {
             insertLine = i;
             break;
           }
           // 空行以外の要件行があれば更新
-          if (l.trim() && (l.match(/^\s+「/) || l.match(/^\s+%/) || l.match(/^\s+;/))) {
+          if (l.trim() && (l.match(/^\s+「/) || l.match(/^\s+%/) || l.match(/^\s+;/) || l.match(/^\s+\?/))) {
             insertLine = i + 1;
           }
         }
@@ -765,15 +768,17 @@ connection.onCodeAction((params: CodeActionParams): CodeAction[] => {
           }
         }
 
-        // 挿入位置を探す
+        // 挿入位置を探す（コメント行は無視）
         let insertLine = diagLine + 1;
         for (let i = diagLine + 1; i < lines.length; i++) {
           const l = lines[i];
+          // コメント行はスキップ
+          if (l.match(/^\s*\/\//)) continue;
           if (l.match(/^\s*#/) || l.match(/^\s*::/) || l.match(/^\s*>>/)) {
             insertLine = i;
             break;
           }
-          if (l.trim() && (l.match(/^\s+「/) || l.match(/^\s+%/) || l.match(/^\s+\?/))) {
+          if (l.trim() && (l.match(/^\s+「/) || l.match(/^\s+%/) || l.match(/^\s+\?/) || l.match(/^\s+;/))) {
             insertLine = i + 1;
           }
         }
@@ -816,10 +821,12 @@ connection.onCodeAction((params: CodeActionParams): CodeAction[] => {
     }
 
     if (!hasEffect) {
-      // 効果の挿入位置を探す
+      // 効果の挿入位置を探す（コメント行は無視）
       let insertLine = cursorLine + 1;
       for (let i = cursorLine + 1; i < lines.length; i++) {
         const l = lines[i];
+        // コメント行はスキップ
+        if (l.match(/^\s*\/\//)) continue;
         if (l.match(/^\s*#/) || l.match(/^\s*::/) || !l.trim()) {
           insertLine = i;
           break;
