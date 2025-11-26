@@ -23,11 +23,15 @@ import {
   SemanticTokensBuilder,
   SemanticTokensLegend,
   SemanticTokens,
+  CodeAction,
+  CodeActionKind,
+  CodeActionParams,
 } from 'vscode-languageserver/node';
 
 import { TextDocument } from 'vscode-languageserver-textdocument';
-import { parse, ParseResult, ParseError } from '../language/parser';
-import { Document, Claim, Namespace, Requirement, Norm, Issue, ASTNode } from '../language/ast';
+import { parse, ParseResult } from '../language/parser';
+import { Document, Claim, Requirement, ASTNode } from '../language/ast';
+import { statuteManager, Statute, StatuteRequirement, parseStatuteKey } from '../language/statute';
 
 // 接続を作成
 const connection = createConnection(ProposedFeatures.all);
@@ -72,6 +76,9 @@ connection.onInitialize((params: InitializeParams): InitializeResult => {
       hoverProvider: true,
       documentSymbolProvider: true,
       foldingRangeProvider: true,
+      codeActionProvider: {
+        codeActionKinds: [CodeActionKind.QuickFix],
+      },
       semanticTokensProvider: {
         legend,
         full: true,
@@ -149,6 +156,43 @@ function validateSemantics(doc: Document): Diagnostic[] {
         });
       }
     }
+
+    // 条文に基づく要件網羅性チェック
+    if (claim.reference) {
+      const statute = findStatuteFromReference(claim.reference.citation);
+      if (statute) {
+        const missingReqs = checkRequirementCoverage(statute, claim.requirements);
+        if (missingReqs.length > 0) {
+          diagnostics.push({
+            severity: DiagnosticSeverity.Information,
+            range: {
+              start: { line: claim.range.start.line, character: claim.range.start.column },
+              end: { line: claim.range.end.line, character: claim.range.end.column },
+            },
+            message: `以下の要件が検討されていません: ${missingReqs.join(', ')}`,
+            source: '本件 Matcha',
+            data: { missingRequirements: missingReqs, statute: statute.name },
+          });
+        }
+
+        // 書かれざる要件のチェック
+        if (statute.unwrittenRequirements && statute.unwrittenRequirements.length > 0) {
+          const missingUnwritten = checkUnwrittenRequirements(statute, claim.requirements);
+          if (missingUnwritten.length > 0) {
+            diagnostics.push({
+              severity: DiagnosticSeverity.Hint,
+              range: {
+                start: { line: claim.range.start.line, character: claim.range.start.column },
+                end: { line: claim.range.end.line, character: claim.range.end.column },
+              },
+              message: `書かれざる要件の検討: ${missingUnwritten.join(', ')}`,
+              source: '本件 Matcha',
+              data: { missingUnwritten, statute: statute.name },
+            });
+          }
+        }
+      }
+    }
   }
 
   for (const child of doc.children) {
@@ -166,6 +210,78 @@ function validateSemantics(doc: Document): Diagnostic[] {
   return diagnostics;
 }
 
+// 条文参照から条文を検索
+function findStatuteFromReference(citation: string): Statute | undefined {
+  // 条文番号のパターンを試行
+  const patterns = [
+    citation,
+    citation.replace(/第/g, ''),
+    citation.replace(/条$/, ''),
+  ];
+
+  for (const pattern of patterns) {
+    const statute = statuteManager.find(pattern);
+    if (statute) return statute;
+  }
+
+  // 部分一致検索
+  const results = statuteManager.search(citation);
+  return results[0];
+}
+
+// 要件の網羅性チェック
+function checkRequirementCoverage(statute: Statute, requirements: Requirement[]): string[] {
+  const missing: string[] = [];
+  const reqNames = new Set(requirements.map(r => r.name));
+
+  function checkReq(statuteReq: StatuteRequirement): void {
+    if (statuteReq.required !== false && !reqNames.has(statuteReq.name)) {
+      // 規範名でも探す
+      const foundByNorm = requirements.some(r =>
+        r.norm?.content.includes(statuteReq.name) ||
+        (statuteReq.norm && r.norm?.content.includes(statuteReq.norm))
+      );
+      if (!foundByNorm) {
+        missing.push(statuteReq.name);
+      }
+    }
+    // 下位要件もチェック（ただし親要件が検討されている場合のみ）
+    if (statuteReq.subRequirements && reqNames.has(statuteReq.name)) {
+      for (const subReq of statuteReq.subRequirements) {
+        checkReq(subReq);
+      }
+    }
+  }
+
+  for (const req of statute.requirements) {
+    checkReq(req);
+  }
+
+  return missing;
+}
+
+// 書かれざる要件のチェック
+function checkUnwrittenRequirements(statute: Statute, requirements: Requirement[]): string[] {
+  if (!statute.unwrittenRequirements) return [];
+
+  const missing: string[] = [];
+  const reqNames = new Set(requirements.map(r => r.name));
+
+  for (const unwritten of statute.unwrittenRequirements) {
+    if (!reqNames.has(unwritten.name)) {
+      // 論点として検討されているかチェック
+      const foundAsIssue = requirements.some(r =>
+        r.issue?.norm.content.includes(unwritten.name)
+      );
+      if (!foundAsIssue) {
+        missing.push(unwritten.name);
+      }
+    }
+  }
+
+  return missing;
+}
+
 // 補完
 connection.onCompletion((params: TextDocumentPositionParams): CompletionItem[] => {
   const document = documents.get(params.textDocument.uri);
@@ -180,60 +296,155 @@ connection.onCompletion((params: TextDocumentPositionParams): CompletionItem[] =
 
   const items: CompletionItem[] = [];
 
-  // # の後：一般的な罪名・法的概念
+  // 条文データベースから補完候補を生成
+  const allStatutes = statuteManager.getAll();
+
+  // # の後：条文データベースから罪名・法的概念
   if (lineText.endsWith('#') || lineText.match(/#\S*$/)) {
-    items.push(
-      { label: '窃盗罪', kind: CompletionItemKind.Class, detail: '刑法235条' },
-      { label: '強盗罪', kind: CompletionItemKind.Class, detail: '刑法236条' },
-      { label: '詐欺罪', kind: CompletionItemKind.Class, detail: '刑法246条' },
-      { label: '殺人罪', kind: CompletionItemKind.Class, detail: '刑法199条' },
-      { label: '傷害罪', kind: CompletionItemKind.Class, detail: '刑法204条' },
-      { label: '不法行為', kind: CompletionItemKind.Class, detail: '民法709条' },
-      { label: '債務不履行', kind: CompletionItemKind.Class, detail: '民法415条' },
-    );
+    for (const statute of allStatutes) {
+      items.push({
+        label: statute.name,
+        kind: CompletionItemKind.Class,
+        detail: `${statute.law}${statute.article}条${statute.paragraph ? statute.paragraph + '項' : ''}`,
+        documentation: statute.fullText,
+        insertText: `${statute.name}^${statute.law}${statute.article}条${statute.paragraph ? statute.paragraph + '項' : ''}`,
+      });
+    }
   }
 
   // ^ の後：条文番号
   if (lineText.endsWith('^') || lineText.match(/\^\S*$/)) {
-    items.push(
-      { label: '刑法235条', kind: CompletionItemKind.Reference, detail: '窃盗罪' },
-      { label: '刑法236条', kind: CompletionItemKind.Reference, detail: '強盗罪' },
-      { label: '刑法246条', kind: CompletionItemKind.Reference, detail: '詐欺罪' },
-      { label: '刑法199条', kind: CompletionItemKind.Reference, detail: '殺人罪' },
-      { label: '民法709条', kind: CompletionItemKind.Reference, detail: '不法行為' },
-      { label: '民法415条', kind: CompletionItemKind.Reference, detail: '債務不履行' },
-      { label: '38条1項本文', kind: CompletionItemKind.Reference, detail: '故意' },
-    );
+    for (const statute of allStatutes) {
+      const citation = `${statute.law}${statute.article}条${statute.paragraph ? statute.paragraph + '項' : ''}`;
+      items.push({
+        label: citation,
+        kind: CompletionItemKind.Reference,
+        detail: statute.name,
+        documentation: statute.fullText,
+      });
+    }
   }
 
-  // % の後：規範のテンプレート
+  // % の後：規範のテンプレート（条文データベースから）
   if (lineText.endsWith('%') || lineText.match(/%\S*$/)) {
-    items.push(
-      { label: '事実の認識・認容', kind: CompletionItemKind.Function, detail: '故意の定義' },
-      { label: '占有者の意思に反して占有を自己又は第三者に移転すること', kind: CompletionItemKind.Function, detail: '窃取の定義' },
-      { label: '他人が所有する財産的価値のある有体物', kind: CompletionItemKind.Function, detail: '他人の財物' },
-      { label: '人が物を実力的に支配する関係', kind: CompletionItemKind.Function, detail: '占有の定義' },
-    );
+    for (const statute of allStatutes) {
+      for (const req of statute.requirements) {
+        if (req.norm) {
+          items.push({
+            label: req.norm,
+            kind: CompletionItemKind.Function,
+            detail: `${statute.name} - ${req.name}`,
+          });
+        }
+        // 下位要件の規範も追加
+        if (req.subRequirements) {
+          for (const subReq of req.subRequirements) {
+            if (subReq.norm) {
+              items.push({
+                label: subReq.norm,
+                kind: CompletionItemKind.Function,
+                detail: `${statute.name} - ${subReq.name}`,
+              });
+            }
+          }
+        }
+      }
+      // 書かれざる要件の規範も追加
+      if (statute.unwrittenRequirements) {
+        for (const unwritten of statute.unwrittenRequirements) {
+          if (unwritten.norm) {
+            items.push({
+              label: unwritten.norm,
+              kind: CompletionItemKind.Function,
+              detail: `${statute.name} - ${unwritten.name}（書かれざる要件）`,
+            });
+          }
+        }
+      }
+    }
   }
 
   // ? の後：論点テンプレート
   if (lineText.endsWith('?') || lineText.endsWith('？')) {
-    items.push(
-      { label: ' 意義', kind: CompletionItemKind.Snippet, insertText: ' 意義 => %' },
-      { label: ' 問題提起 ~> 理由 => %規範', kind: CompletionItemKind.Snippet },
-      { label: ' 財産犯と不可罰的な使用窃盗及び遺棄・隠匿罪との区別する必要がある => 不法領得の意思', kind: CompletionItemKind.Snippet },
-    );
+    // 論点になりやすい要件を提案
+    for (const statute of allStatutes) {
+      const collectIssues = (reqs: StatuteRequirement[]): void => {
+        for (const req of reqs) {
+          if (req.isIssue) {
+            items.push({
+              label: req.issueQuestion || `${req.name}の意義`,
+              kind: CompletionItemKind.Snippet,
+              detail: statute.name,
+              insertText: ` ${req.issueQuestion || req.name + 'の意義'} => %${req.norm || req.name}`,
+            });
+          }
+          if (req.subRequirements) {
+            collectIssues(req.subRequirements);
+          }
+        }
+      };
+      collectIssues(statute.requirements);
+      if (statute.unwrittenRequirements) {
+        collectIssues(statute.unwrittenRequirements);
+      }
+    }
   }
 
-  // 「の後：要件名
+  // 「の後：要件名（条文データベースから）
   if (lineText.endsWith('「')) {
-    items.push(
-      { label: '他人の財物」', kind: CompletionItemKind.Property },
-      { label: '窃取」', kind: CompletionItemKind.Property },
-      { label: '故意」', kind: CompletionItemKind.Property },
-      { label: '因果関係」', kind: CompletionItemKind.Property },
-      { label: '第三者」', kind: CompletionItemKind.Property },
-    );
+    for (const statute of allStatutes) {
+      const collectReqNames = (reqs: StatuteRequirement[]): void => {
+        for (const req of reqs) {
+          items.push({
+            label: `${req.name}」`,
+            kind: CompletionItemKind.Property,
+            detail: statute.name,
+            documentation: req.norm,
+          });
+          if (req.subRequirements) {
+            collectReqNames(req.subRequirements);
+          }
+        }
+      };
+      collectReqNames(statute.requirements);
+    }
+  }
+
+  // 現在の主張の根拠条文に基づく要件補完
+  const claimMatch = text.match(/#(\S+)\^([^\s<=:]+)/);
+  if (claimMatch && (lineText.trim() === '' || lineText.match(/^\s+$/))) {
+    const statute = findStatuteFromReference(claimMatch[2]);
+    if (statute) {
+      // 未検討の要件を提案
+      const cached = documentCache.get(params.textDocument.uri);
+      if (cached) {
+        const collectReqs = (reqs: StatuteRequirement[], indent: string = '    '): void => {
+          for (const req of reqs) {
+            items.push({
+              label: `「${req.name}」`,
+              kind: CompletionItemKind.Snippet,
+              detail: '未検討の要件',
+              insertText: req.norm
+                ? `${indent}「${req.name}」: %${req.norm} <= `
+                : `${indent}「${req.name}」 <= `,
+              sortText: '0' + req.name, // 優先表示
+            });
+          }
+        };
+        collectReqs(statute.requirements);
+        if (statute.unwrittenRequirements) {
+          for (const unwritten of statute.unwrittenRequirements) {
+            items.push({
+              label: `? ${unwritten.issueQuestion || unwritten.name}`,
+              kind: CompletionItemKind.Snippet,
+              detail: '書かれざる要件（論点）',
+              insertText: `    ? ${unwritten.issueQuestion || unwritten.name + 'の要否'} => ${unwritten.name}:\n        %${unwritten.norm || ''} <= `,
+              sortText: '1' + unwritten.name,
+            });
+          }
+        }
+      }
+    }
   }
 
   // :: の後：論述空間
@@ -294,6 +505,93 @@ connection.onHover((params: TextDocumentPositionParams): Hover | null => {
   const text = document.getText();
   const lines = text.split('\n');
   const line = lines[position.line] || '';
+
+  // 条文参照のホバー（^の後の条文番号）
+  const refMatch = line.match(/\^([^\s<=:]+)/);
+  if (refMatch) {
+    const refStart = line.indexOf(refMatch[0]);
+    const refEnd = refStart + refMatch[0].length;
+    if (position.character >= refStart && position.character <= refEnd) {
+      const statute = findStatuteFromReference(refMatch[1]);
+      if (statute) {
+        let content = `## ${statute.law}${statute.article}条`;
+        if (statute.paragraph) content += `${statute.paragraph}項`;
+        content += ` - ${statute.name}\n\n`;
+        if (statute.fullText) {
+          content += `> ${statute.fullText}\n\n`;
+        }
+        content += `### 要件\n`;
+        const formatReqs = (reqs: StatuteRequirement[], indent: string = ''): string => {
+          let result = '';
+          for (const req of reqs) {
+            result += `${indent}- **${req.name}**`;
+            if (req.norm) result += `: ${req.norm}`;
+            if (req.isIssue) result += ' ⚠️論点';
+            result += '\n';
+            if (req.subRequirements) {
+              result += formatReqs(req.subRequirements, indent + '  ');
+            }
+          }
+          return result;
+        };
+        content += formatReqs(statute.requirements);
+        if (statute.unwrittenRequirements && statute.unwrittenRequirements.length > 0) {
+          content += `\n### 書かれざる要件\n`;
+          content += formatReqs(statute.unwrittenRequirements);
+        }
+        content += `\n### 効果\n${statute.effect.content}`;
+        return {
+          contents: {
+            kind: MarkupKind.Markdown,
+            value: content,
+          },
+        };
+      }
+    }
+  }
+
+  // 要件名のホバー（「」内）
+  const reqMatch = line.match(/「([^」]+)」/);
+  if (reqMatch) {
+    const reqStart = line.indexOf(reqMatch[0]);
+    const reqEnd = reqStart + reqMatch[0].length;
+    if (position.character >= reqStart && position.character <= reqEnd) {
+      const reqName = reqMatch[1];
+      // 条文データベースから該当する要件を検索
+      for (const statute of statuteManager.getAll()) {
+        const findReq = (reqs: StatuteRequirement[]): StatuteRequirement | undefined => {
+          for (const req of reqs) {
+            if (req.name === reqName) return req;
+            if (req.subRequirements) {
+              const found = findReq(req.subRequirements);
+              if (found) return found;
+            }
+          }
+          return undefined;
+        };
+        const foundReq = findReq(statute.requirements);
+        if (foundReq) {
+          let content = `## 「${foundReq.name}」\n\n`;
+          content += `**条文**: ${statute.law}${statute.article}条 - ${statute.name}\n\n`;
+          if (foundReq.norm) {
+            content += `**規範**: ${foundReq.norm}\n\n`;
+          }
+          if (foundReq.isIssue) {
+            content += `⚠️ **論点になりやすい要件**\n`;
+            if (foundReq.issueQuestion) {
+              content += `問題提起: ${foundReq.issueQuestion}\n`;
+            }
+          }
+          return {
+            contents: {
+              kind: MarkupKind.Markdown,
+              value: content,
+            },
+          };
+        }
+      }
+    }
+  }
 
   // 記号のホバー情報
   const hoverInfo: { [key: string]: { title: string; description: string } } = {
@@ -373,6 +671,62 @@ connection.onHover((params: TextDocumentPositionParams): Hover | null => {
   }
 
   return null;
+});
+
+// コードアクション（クイックフィックス）
+connection.onCodeAction((params: CodeActionParams): CodeAction[] => {
+  const actions: CodeAction[] = [];
+  const document = documents.get(params.textDocument.uri);
+  if (!document) return actions;
+
+  for (const diagnostic of params.context.diagnostics) {
+    if (diagnostic.data && (diagnostic.data as any).missingRequirements) {
+      const missing = (diagnostic.data as any).missingRequirements as string[];
+      const statute = (diagnostic.data as any).statute as string;
+
+      // 不足している要件を追加するアクション
+      actions.push({
+        title: `不足要件を追加: ${missing.join(', ')}`,
+        kind: CodeActionKind.QuickFix,
+        diagnostics: [diagnostic],
+        edit: {
+          changes: {
+            [params.textDocument.uri]: [{
+              range: {
+                start: { line: diagnostic.range.end.line, character: 0 },
+                end: { line: diagnostic.range.end.line, character: 0 },
+              },
+              newText: missing.map(req => `    「${req}」 <= \n`).join(''),
+            }],
+          },
+        },
+      });
+    }
+
+    if (diagnostic.data && (diagnostic.data as any).missingUnwritten) {
+      const missing = (diagnostic.data as any).missingUnwritten as string[];
+
+      // 書かれざる要件を論点として追加するアクション
+      actions.push({
+        title: `書かれざる要件を論点として追加: ${missing.join(', ')}`,
+        kind: CodeActionKind.QuickFix,
+        diagnostics: [diagnostic],
+        edit: {
+          changes: {
+            [params.textDocument.uri]: [{
+              range: {
+                start: { line: diagnostic.range.end.line, character: 0 },
+                end: { line: diagnostic.range.end.line, character: 0 },
+              },
+              newText: missing.map(req => `    ? ${req}の要否 => ${req}:\n        % <= \n`).join(''),
+            }],
+          },
+        },
+      });
+    }
+  }
+
+  return actions;
 });
 
 // ドキュメントシンボル
