@@ -109,7 +109,7 @@ connection.onInitialize((params: InitializeParams): InitializeResult => {
         codeActionKinds: [CodeActionKind.QuickFix, CodeActionKind.Source],
       },
       executeCommandProvider: {
-        commands: ['matcha.generateTemplate', 'matcha.reloadArticles'],
+        commands: ['houjicha.generateTemplate', 'houjicha.reloadArticles'],
       },
     },
   };
@@ -117,17 +117,17 @@ connection.onInitialize((params: InitializeParams): InitializeResult => {
 
 // 初期化完了後
 connection.onInitialized(() => {
-  connection.console.log('本件 Matcha LSP サーバー起動完了');
+  connection.console.log('ほうじ茶 LSP サーバー起動完了');
 });
 
 // コマンド実行
 connection.onExecuteCommand(async (params: ExecuteCommandParams) => {
-  if (params.command === 'matcha.reloadArticles') {
+  if (params.command === 'houjicha.reloadArticles') {
     if (workspaceRoot) {
       articleDatabase = loadArticleDatabase(workspaceRoot);
       connection.console.log(`条文データベース再読み込み: ${articleDatabase.articles.size}件`);
     }
-  } else if (params.command === 'matcha.generateTemplate') {
+  } else if (params.command === 'houjicha.generateTemplate') {
     const [articleQuery, uri] = params.arguments || [];
     if (articleQuery && uri) {
       const article = findArticle(articleDatabase, articleQuery);
@@ -157,7 +157,7 @@ async function validateDocument(textDocument: TextDocument): Promise<void> {
       end: { line: error.range.end.line, character: error.range.end.column },
     },
     message: error.message,
-    source: '本件 Matcha',
+    source: 'ほうじ茶',
   }));
 
   // 意味的な検証（条文データベースを参照）
@@ -180,7 +180,7 @@ function validateSemantics(doc: Document): Diagnostic[] {
           end: { line: claim.range.end.line, character: claim.range.end.column },
         },
         message: '主張に要件または事実のあてはめがありません',
-        source: '本件 Matcha',
+        source: 'ほうじ茶',
       });
     }
 
@@ -195,7 +195,7 @@ function validateSemantics(doc: Document): Diagnostic[] {
             end: { line: claim.range.end.line, character: claim.range.end.column },
           },
           message: '主張は該当(+)とされていますが、否定された要件(!)が含まれています',
-          source: '本件 Matcha',
+          source: 'ほうじ茶',
         });
       }
     }
@@ -233,7 +233,7 @@ function validateSemantics(doc: Document): Diagnostic[] {
                 end: { line: claim.range.end.line, character: claim.range.end.column },
               },
               message: `「${reqName}」の検討が見つかりません`,
-              source: '本件 Matcha',
+              source: 'ほうじ茶',
               data: { missingRequirement: reqName, articleId: article.id },
             });
           }
@@ -255,7 +255,7 @@ function validateSemantics(doc: Document): Diagnostic[] {
               end: { line: claim.range.end.line, character: claim.range.end.column },
             },
             message: `論点「${issue.問題}」の検討を推奨`,
-            source: '本件 Matcha',
+            source: 'ほうじ茶',
           });
         }
       }
@@ -547,8 +547,14 @@ connection.onCodeAction((params: CodeActionParams): CodeAction[] => {
   const document = documents.get(params.textDocument.uri);
   if (!document) return actions;
 
+  const text = document.getText();
+  const lines = text.split('\n');
+
   for (const diagnostic of params.context.diagnostics) {
-    // 欠落要件の追加アクション
+    const diagLine = diagnostic.range.start.line;
+    const lineText = lines[diagLine] || '';
+
+    // 1. 欠落要件の追加アクション
     if (diagnostic.data?.missingRequirement) {
       const reqName = diagnostic.data.missingRequirement;
       const articleId = diagnostic.data.articleId;
@@ -559,6 +565,22 @@ connection.onCodeAction((params: CodeActionParams): CodeAction[] => {
           (a: Annotation) => a.範囲 === reqName || a.name === reqName
         );
         const norm = annotation?.解釈?.[0]?.規範;
+
+        // 挿入位置を探す（主張の最後の要件の後、または効果の前）
+        let insertLine = diagnostic.range.end.line;
+        for (let i = diagLine + 1; i < lines.length; i++) {
+          const l = lines[i];
+          // 次の主張や名前空間、効果が来たら終了
+          if (l.match(/^\s*#/) || l.match(/^\s*::/) || l.match(/^\s*>>/)) {
+            insertLine = i;
+            break;
+          }
+          // 空行以外の要件行があれば更新
+          if (l.trim() && (l.match(/^\s+「/) || l.match(/^\s+%/) || l.match(/^\s+;/))) {
+            insertLine = i + 1;
+          }
+        }
+
         const insertText = norm
           ? `    「${reqName}」: %${norm} <= 【あてはめ】\n`
           : `    「${reqName}」 <= 【あてはめ】\n`;
@@ -567,12 +589,13 @@ connection.onCodeAction((params: CodeActionParams): CodeAction[] => {
           title: `「${reqName}」を追加`,
           kind: CodeActionKind.QuickFix,
           diagnostics: [diagnostic],
+          isPreferred: true,
           edit: {
             changes: {
               [params.textDocument.uri]: [{
                 range: {
-                  start: { line: diagnostic.range.end.line, character: 0 },
-                  end: { line: diagnostic.range.end.line, character: 0 },
+                  start: { line: insertLine, character: 0 },
+                  end: { line: insertLine, character: 0 },
                 },
                 newText: insertText,
               }],
@@ -580,6 +603,222 @@ connection.onCodeAction((params: CodeActionParams): CodeAction[] => {
           },
         });
       }
+    }
+
+    // 2. 閉じ括弧がない場合のクイックフィックス
+    if (diagnostic.message.includes('閉じ括弧') || diagnostic.message.includes('」が見つかりません')) {
+      // 開き括弧「の位置を探す
+      const openBracketIndex = lineText.indexOf('「');
+      if (openBracketIndex !== -1) {
+        // 行末に」を追加
+        actions.push({
+          title: '閉じ括弧「」」を追加',
+          kind: CodeActionKind.QuickFix,
+          diagnostics: [diagnostic],
+          isPreferred: true,
+          edit: {
+            changes: {
+              [params.textDocument.uri]: [{
+                range: {
+                  start: { line: diagLine, character: lineText.length },
+                  end: { line: diagLine, character: lineText.length },
+                },
+                newText: '」',
+              }],
+            },
+          },
+        });
+      }
+    }
+
+    // 3. 要件なし主張へのテンプレート追加
+    if (diagnostic.message.includes('要件または事実のあてはめがありません')) {
+      // 主張を解析して条文を特定
+      const claimMatch = lineText.match(/#([^\^<=:\s]+)/);
+      const refMatch = lineText.match(/\^([^\s<=:]+)/);
+
+      let insertText = '';
+
+      // 条文データベースからテンプレートを取得
+      const articleQuery = refMatch?.[1] || claimMatch?.[1];
+      const article = articleQuery ? findArticle(articleDatabase, articleQuery) : undefined;
+
+      if (article) {
+        // 条文から要件テンプレートを生成
+        const requirements = article.アノテーション.filter(a => a.種別 === '要件' && a.範囲);
+        if (requirements.length > 0) {
+          insertText = requirements.map(req => {
+            const norm = req.解釈?.[0]?.規範;
+            return norm
+              ? `    「${req.範囲}」: %${norm} <= 【あてはめ】`
+              : `    「${req.範囲}」 <= 【あてはめ】`;
+          }).join('\n') + '\n';
+        }
+      }
+
+      // フォールバック：基本テンプレート
+      if (!insertText) {
+        insertText = '    「要件1」 <= 【事実をあてはめる】\n    「要件2」 <= 【事実をあてはめる】\n';
+      }
+
+      // 行末が : で終わっていない場合は : を追加
+      const needsColon = !lineText.trimEnd().endsWith(':');
+
+      actions.push({
+        title: '要件テンプレートを追加',
+        kind: CodeActionKind.QuickFix,
+        diagnostics: [diagnostic],
+        edit: {
+          changes: {
+            [params.textDocument.uri]: needsColon ? [
+              {
+                range: {
+                  start: { line: diagLine, character: lineText.length },
+                  end: { line: diagLine, character: lineText.length },
+                },
+                newText: ':',
+              },
+              {
+                range: {
+                  start: { line: diagLine + 1, character: 0 },
+                  end: { line: diagLine + 1, character: 0 },
+                },
+                newText: insertText,
+              },
+            ] : [{
+              range: {
+                start: { line: diagLine + 1, character: 0 },
+                end: { line: diagLine + 1, character: 0 },
+              },
+              newText: insertText,
+            }],
+          },
+        },
+      });
+    }
+
+    // 4. 構文エラー「予期しないトークン」への対応
+    if (diagnostic.message.includes('予期しないトークン')) {
+      // 条文なしの主張 #主張^ の場合
+      if (lineText.match(/#[^\^]+\^[\s]*$/)) {
+        actions.push({
+          title: '条文番号を追加',
+          kind: CodeActionKind.QuickFix,
+          diagnostics: [diagnostic],
+          edit: {
+            changes: {
+              [params.textDocument.uri]: [{
+                range: {
+                  start: { line: diagLine, character: lineText.length },
+                  end: { line: diagLine, character: lineText.length },
+                },
+                newText: '【条文番号】',
+              }],
+            },
+          },
+        });
+      }
+    }
+
+    // 5. 論点推奨への対応
+    if (diagnostic.message.includes('論点') && diagnostic.message.includes('推奨')) {
+      const issueMatch = diagnostic.message.match(/「([^」]+)」/);
+      if (issueMatch) {
+        const issueName = issueMatch[1];
+
+        // 条文データベースから論点情報を取得
+        const claimMatch = lineText.match(/#([^\^<=:\s]+)/);
+        const refMatch = lineText.match(/\^([^\s<=:]+)/);
+        const articleQuery = refMatch?.[1] || claimMatch?.[1];
+        const article = articleQuery ? findArticle(articleDatabase, articleQuery) : undefined;
+
+        let issueText = `    ? ${issueName} ~> 【理由】 => %【規範】\n`;
+
+        if (article) {
+          const issues = getIssues(article);
+          const foundIssue = issues.find(i => i.issue.問題?.includes(issueName));
+          if (foundIssue && foundIssue.issue.解釈?.[0]?.規範) {
+            issueText = `    ? ${issueName} ~> ${foundIssue.issue.理由 || '【理由】'} => %${foundIssue.issue.解釈[0].規範}\n`;
+          }
+        }
+
+        // 挿入位置を探す
+        let insertLine = diagLine + 1;
+        for (let i = diagLine + 1; i < lines.length; i++) {
+          const l = lines[i];
+          if (l.match(/^\s*#/) || l.match(/^\s*::/) || l.match(/^\s*>>/)) {
+            insertLine = i;
+            break;
+          }
+          if (l.trim() && (l.match(/^\s+「/) || l.match(/^\s+%/) || l.match(/^\s+\?/))) {
+            insertLine = i + 1;
+          }
+        }
+
+        actions.push({
+          title: `論点「${issueName}」を追加`,
+          kind: CodeActionKind.QuickFix,
+          diagnostics: [diagnostic],
+          edit: {
+            changes: {
+              [params.textDocument.uri]: [{
+                range: {
+                  start: { line: insertLine, character: 0 },
+                  end: { line: insertLine, character: 0 },
+                },
+                newText: issueText,
+              }],
+            },
+          },
+        });
+      }
+    }
+  }
+
+  // カーソル位置での追加アクション（診断に関係なく）
+  const cursorLine = params.range.start.line;
+  const cursorLineText = lines[cursorLine] || '';
+
+  // 主張行で効果を追加
+  if (cursorLineText.match(/^\s*[+!]?#/)) {
+    // 効果がまだない場合
+    let hasEffect = false;
+    for (let i = cursorLine + 1; i < lines.length; i++) {
+      const l = lines[i];
+      if (l.match(/^\s*#/) || l.match(/^\s*::/)) break;
+      if (l.match(/^\s*>>/)) {
+        hasEffect = true;
+        break;
+      }
+    }
+
+    if (!hasEffect) {
+      // 効果の挿入位置を探す
+      let insertLine = cursorLine + 1;
+      for (let i = cursorLine + 1; i < lines.length; i++) {
+        const l = lines[i];
+        if (l.match(/^\s*#/) || l.match(/^\s*::/) || !l.trim()) {
+          insertLine = i;
+          break;
+        }
+        insertLine = i + 1;
+      }
+
+      actions.push({
+        title: '効果（>>）を追加',
+        kind: CodeActionKind.Source,
+        edit: {
+          changes: {
+            [params.textDocument.uri]: [{
+              range: {
+                start: { line: insertLine, character: 0 },
+                end: { line: insertLine, character: 0 },
+              },
+              newText: '>> 【結論を記載】\n',
+            }],
+          },
+        },
+      });
     }
   }
 
