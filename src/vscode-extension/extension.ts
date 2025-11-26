@@ -56,37 +56,38 @@ class HoujichaInlineCompletionProvider implements vscode.InlineCompletionItemPro
         return null;
       }
 
-      // 最初の補完候補をインライン補完として表示
-      const firstItem = completions.items[0];
-      let insertText = '';
+      // insertTextを抽出するヘルパー関数
+      const getInsertText = (item: vscode.CompletionItem): string => {
+        if (typeof item.insertText === 'string') {
+          return item.insertText;
+        } else if (item.insertText instanceof vscode.SnippetString) {
+          return item.insertText.value;
+        }
+        // insertTextがない場合はlabelを使うが、「」マーカーを除去
+        const label = typeof item.label === 'string' ? item.label : item.label.label;
+        // ✓や「」を除去してクリーンなテキストを返す
+        return label.replace(/^[✓ ]+/, '').replace(/^「/, '').replace(/」$/, '') + '」 <= ';
+      };
 
-      if (typeof firstItem.insertText === 'string') {
-        insertText = firstItem.insertText;
-      } else if (firstItem.insertText instanceof vscode.SnippetString) {
-        insertText = firstItem.insertText.value;
-      } else if (firstItem.label) {
-        insertText = typeof firstItem.label === 'string' ? firstItem.label : firstItem.label.label;
+      // ✓マークが付いていない最初の候補を探す
+      const getLabel = (item: vscode.CompletionItem): string => {
+        return typeof item.label === 'string' ? item.label : item.label.label;
+      };
+
+      let targetItem = completions.items[0];
+      const firstLabel = getLabel(targetItem);
+
+      // ✓マークが付いている場合は未記述の候補を優先
+      if (firstLabel.startsWith('✓')) {
+        const nonWrittenItem = completions.items.find(item => !getLabel(item).startsWith('✓'));
+        if (nonWrittenItem) {
+          targetItem = nonWrittenItem;
+        }
       }
 
+      const insertText = getInsertText(targetItem);
       if (!insertText) {
         return null;
-      }
-
-      // ✓マークが付いている場合は次の候補を使う
-      if (insertText.startsWith('✓')) {
-        const nonWrittenItem = completions.items.find(item => {
-          const label = typeof item.label === 'string' ? item.label : item.label.label;
-          return !label.startsWith('✓');
-        });
-        if (nonWrittenItem) {
-          if (typeof nonWrittenItem.insertText === 'string') {
-            insertText = nonWrittenItem.insertText;
-          } else if (nonWrittenItem.insertText instanceof vscode.SnippetString) {
-            insertText = nonWrittenItem.insertText.value;
-          } else if (nonWrittenItem.label) {
-            insertText = typeof nonWrittenItem.label === 'string' ? nonWrittenItem.label : nonWrittenItem.label.label;
-          }
-        }
       }
 
       return [

@@ -497,7 +497,7 @@ connection.onCompletion((params: TextDocumentPositionParams): CompletionItem[] =
             // 要件は「」で、論点（不文の要件）は%で補完
             if (annotation.種別 === '要件' && annotation.範囲) {
               items.push({
-                label: (isWritten ? '✓ ' : '') + reqName + '」',
+                label: (isWritten ? '✓ ' : '') + '「' + reqName + '」',
                 kind: CompletionItemKind.Property,
                 detail: annotation.解釈?.[0]?.規範 || '構成要件',
                 documentation: {
@@ -505,6 +505,8 @@ connection.onCompletion((params: TextDocumentPositionParams): CompletionItem[] =
                   value: docContent,
                 },
                 sortText: `${isWritten ? '1' : '0'}-${String(sortOrder).padStart(2, '0')}`,
+                // filterTextで「から始まる文字列としてマッチさせる
+                filterText: '「' + reqName,
                 insertText: annotation.解釈?.[0]?.規範
                   ? `${reqName}」: %${annotation.解釈[0].規範} <= `
                   : `${reqName}」 <= `,
@@ -514,7 +516,7 @@ connection.onCompletion((params: TextDocumentPositionParams): CompletionItem[] =
               // 論点や name のみの要件は %規範 形式で補完
               const norm = annotation.解釈?.[0]?.規範 || reqName;
               items.push({
-                label: (isWritten ? '✓ ' : '') + reqName + '」',
+                label: (isWritten ? '✓ ' : '') + '「' + reqName + '」',
                 kind: CompletionItemKind.Property,
                 detail: `${annotation.種別}：${norm}`,
                 documentation: {
@@ -522,6 +524,7 @@ connection.onCompletion((params: TextDocumentPositionParams): CompletionItem[] =
                   value: docContent,
                 },
                 sortText: `${isWritten ? '1' : '0'}-${String(sortOrder).padStart(2, '0')}`,
+                filterText: '「' + reqName,
                 // 閉じ括弧の後に規範を追加（論点は%で書くことが多い）
                 insertText: `${reqName}」: %${norm} <= `,
                 insertTextFormat: InsertTextFormat.PlainText,
