@@ -375,8 +375,12 @@ connection.onCompletion((params: TextDocumentPositionParams): CompletionItem[] =
   // 「の後：要件名（条文データベースから、条文順でソート）
   if (lineText.endsWith('「')) {
     const currentClaim = findCurrentClaim(text, offset);
+    connection.console.log(`[補完] 現在の主張: ${currentClaim}, DB件数: ${articleDatabase.articles.size}`);
+
     if (currentClaim) {
       const article = findArticle(articleDatabase, currentClaim);
+      connection.console.log(`[補完] 条文検索結果: ${article ? article.id : 'なし'}`);
+
       if (article) {
         // 既に書かれている要件を収集
         const cached = documentCache.get(params.textDocument.uri);
@@ -453,7 +457,29 @@ connection.onCompletion((params: TextDocumentPositionParams): CompletionItem[] =
             });
           }
         }
+      } else {
+        // 条文が見つからない場合のフォールバック
+        connection.console.log(`[補完] フォールバック: 条文未発見 (主張=${currentClaim})`);
+        items.push(
+          { label: '要件名」', kind: CompletionItemKind.Property, detail: '要件を追加', insertText: '要件名」 <= ' },
+        );
       }
+    } else {
+      // 主張が見つからない場合
+      connection.console.log(`[補完] フォールバック: 主張未発見`);
+      items.push(
+        { label: '要件名」', kind: CompletionItemKind.Property, detail: '要件を追加', insertText: '要件名」 <= ' },
+      );
+    }
+
+    // DBが空の場合の警告
+    if (articleDatabase.articles.size === 0) {
+      items.push({
+        label: '⚠️ 条文DBが読み込まれていません',
+        kind: CompletionItemKind.Text,
+        detail: 'フォルダを開き直してください',
+        documentation: 'VSCodeで「ファイル」→「フォルダを開く」でmachaフォルダを開いてください。',
+      });
     }
   }
 
