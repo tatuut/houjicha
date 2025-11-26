@@ -505,10 +505,10 @@ connection.onCompletion((params: TextDocumentPositionParams): CompletionItem[] =
                 },
                 sortText: `${isWritten ? '1' : '0'}-${String(sortOrder).padStart(2, '0')}`,
                 filterText: '(' + reqName,
-                // (も含めて挿入（(がトリガーで置換されるため）
+                // (は既に入力済みなので、それ以降を挿入
                 insertText: annotation.解釈?.[0]?.規範
-                  ? `(${reqName}): %${annotation.解釈[0].規範} <= `
-                  : `(${reqName}) <= `,
+                  ? `${reqName}): %${annotation.解釈[0].規範} <= `
+                  : `${reqName}) <= `,
                 insertTextFormat: InsertTextFormat.PlainText,
               });
             } else {
@@ -524,8 +524,8 @@ connection.onCompletion((params: TextDocumentPositionParams): CompletionItem[] =
                 },
                 sortText: `${isWritten ? '1' : '0'}-${String(sortOrder).padStart(2, '0')}`,
                 filterText: '(' + reqName,
-                // (も含めて挿入
-                insertText: `(${reqName}): %${norm} <= `,
+                // (は既に入力済みなので、それ以降を挿入
+                insertText: `${reqName}): %${norm} <= `,
                 insertTextFormat: InsertTextFormat.PlainText,
               });
             }

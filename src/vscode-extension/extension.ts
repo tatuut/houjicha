@@ -65,8 +65,8 @@ class HoujichaInlineCompletionProvider implements vscode.InlineCompletionItemPro
         }
         // insertTextがない場合はlabelを使う
         const label = typeof item.label === 'string' ? item.label : item.label.label;
-        // ✓を除去、「」は保持
-        const cleanLabel = label.replace(/^[✓ ]+/, '');
+        // ✓と先頭の(を除去（(は既に入力済み）
+        const cleanLabel = label.replace(/^[✓ ]+/, '').replace(/^\(/, '');
         return cleanLabel + ' <= ';
       };
 
