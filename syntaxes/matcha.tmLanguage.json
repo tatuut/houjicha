@@ -1,0 +1,188 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Matcha",
+  "scopeName": "source.matcha",
+  "patterns": [
+    { "include": "#comment" },
+    { "include": "#namespace" },
+    { "include": "#claim" },
+    { "include": "#issue" },
+    { "include": "#effect" },
+    { "include": "#requirement" },
+    { "include": "#norm" },
+    { "include": "#application" },
+    { "include": "#evaluation" },
+    { "include": "#logical-operators" },
+    { "include": "#conclusion" },
+    { "include": "#constant-definition" },
+    { "include": "#constant-reference" },
+    { "include": "#reference" }
+  ],
+  "repository": {
+    "comment": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.matcha",
+          "match": "//.*$"
+        }
+      ]
+    },
+    "namespace": {
+      "patterns": [
+        {
+          "name": "entity.name.namespace.matcha",
+          "match": "^\\s*::.+$",
+          "captures": {
+            "0": { "name": "entity.name.namespace.matcha" }
+          }
+        }
+      ]
+    },
+    "claim": {
+      "patterns": [
+        {
+          "name": "keyword.control.claim.matcha",
+          "match": "[+!]?#[^\\^<=:\\s]+",
+          "captures": {
+            "0": { "name": "keyword.control.claim.matcha" }
+          }
+        }
+      ]
+    },
+    "reference": {
+      "patterns": [
+        {
+          "name": "entity.name.tag.reference.matcha",
+          "match": "\\^[^\\s<=:]+",
+          "captures": {
+            "0": { "name": "entity.name.tag.reference.matcha" }
+          }
+        }
+      ]
+    },
+    "issue": {
+      "patterns": [
+        {
+          "name": "keyword.control.issue.matcha",
+          "match": "\\?\\s*[^~=>]+",
+          "captures": {
+            "0": { "name": "keyword.control.issue.matcha" }
+          }
+        }
+      ]
+    },
+    "effect": {
+      "patterns": [
+        {
+          "name": "keyword.control.effect.matcha",
+          "match": ">>\\s*.+$",
+          "captures": {
+            "0": { "name": "keyword.control.effect.matcha" }
+          }
+        }
+      ]
+    },
+    "requirement": {
+      "patterns": [
+        {
+          "name": "string.quoted.requirement.matcha",
+          "match": "[+!]?「[^」]+」",
+          "captures": {
+            "0": { "name": "string.quoted.requirement.matcha" }
+          }
+        }
+      ]
+    },
+    "norm": {
+      "patterns": [
+        {
+          "name": "support.function.norm.matcha",
+          "match": "[+!]?%[^<=:\\s@]+[^<=@]*(?=\\s*(<=|:|$|@))",
+          "captures": {
+            "0": { "name": "support.function.norm.matcha" }
+          }
+        }
+      ]
+    },
+    "application": {
+      "patterns": [
+        {
+          "name": "keyword.operator.application.matcha",
+          "match": "<=",
+          "captures": {
+            "0": { "name": "keyword.operator.application.matcha" }
+          }
+        }
+      ]
+    },
+    "evaluation": {
+      "patterns": [
+        {
+          "name": "variable.parameter.evaluation.matcha",
+          "match": "@[^\\s&|)]+",
+          "captures": {
+            "0": { "name": "variable.parameter.evaluation.matcha" }
+          }
+        }
+      ]
+    },
+    "logical-operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.logical.and.matcha",
+          "match": "\\\\?&|＆"
+        },
+        {
+          "name": "keyword.operator.logical.or.matcha",
+          "match": "\\||｜"
+        },
+        {
+          "name": "keyword.operator.reason.matcha",
+          "match": "~>"
+        },
+        {
+          "name": "keyword.operator.implies.matcha",
+          "match": "=>"
+        },
+        {
+          "name": "keyword.operator.colon.matcha",
+          "match": ":"
+        }
+      ]
+    },
+    "conclusion": {
+      "patterns": [
+        {
+          "name": "keyword.control.conclusion.positive.matcha",
+          "match": "^\\s*\\+(?=#|「|%)"
+        },
+        {
+          "name": "keyword.control.conclusion.negative.matcha",
+          "match": "^\\s*!(?=#|「|%)"
+        }
+      ]
+    },
+    "constant-definition": {
+      "patterns": [
+        {
+          "name": "storage.type.constant.matcha",
+          "match": "\\bas\\s+[^\\s]+",
+          "captures": {
+            "0": { "name": "storage.type.constant.matcha" }
+          }
+        }
+      ]
+    },
+    "constant-reference": {
+      "patterns": [
+        {
+          "name": "variable.other.constant.matcha",
+          "match": "\\$[^\\s<=:]+",
+          "captures": {
+            "0": { "name": "variable.other.constant.matcha" }
+          }
+        }
+      ]
+    }
+  }
+}
