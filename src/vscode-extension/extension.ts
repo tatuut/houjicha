@@ -33,7 +33,7 @@ class HoujichaInlineCompletionProvider implements vscode.InlineCompletionItemPro
 
     // 補完をトリガーする条件をチェック
     const shouldTrigger =
-      textBeforeCursor.endsWith('「') ||
+      textBeforeCursor.endsWith('(') ||
       textBeforeCursor.endsWith('%') ||
       textBeforeCursor.endsWith('?') ||
       textBeforeCursor.endsWith('？') ||
