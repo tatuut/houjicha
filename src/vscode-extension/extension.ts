@@ -63,10 +63,11 @@ class HoujichaInlineCompletionProvider implements vscode.InlineCompletionItemPro
         } else if (item.insertText instanceof vscode.SnippetString) {
           return item.insertText.value;
         }
-        // insertTextがない場合はlabelを使うが、「」マーカーを除去
+        // insertTextがない場合はlabelを使う
         const label = typeof item.label === 'string' ? item.label : item.label.label;
-        // ✓や「」を除去してクリーンなテキストを返す
-        return label.replace(/^[✓ ]+/, '').replace(/^「/, '').replace(/」$/, '') + '」 <= ';
+        // ✓を除去、「」は保持
+        const cleanLabel = label.replace(/^[✓ ]+/, '');
+        return cleanLabel + ' <= ';
       };
 
       // ✓マークが付いていない最初の候補を探す
