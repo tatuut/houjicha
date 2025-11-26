@@ -497,19 +497,26 @@ export class Parser {
       concluded = 'negative';
     }
 
-    this.expect(TokenType.LBRACKET_JP, '要件には「が必要です');
+    const openBracket = this.expect(TokenType.LBRACKET_JP, '要件には「が必要です');
+    const openBracketPos = openBracket.range.start;
 
     // 要件名を取得
     let name = '';
+    let lastTokenEnd = openBracket.range.end;
     while (!this.isAtEnd() &&
            !this.check(TokenType.RBRACKET_JP) &&
            !this.check(TokenType.NEWLINE)) {
-      name += this.advance().value;
+      const token = this.advance();
+      name += token.value;
+      lastTokenEnd = token.range.end;
     }
 
-    // 閉じ括弧がない場合のエラー
+    // 閉じ括弧がない場合のエラー（開き括弧の位置でエラーを報告）
     if (this.check(TokenType.NEWLINE) || this.isAtEnd()) {
-      this.addError('閉じ括弧「」」が見つかりません');
+      this.addError('閉じ括弧「」」が見つかりません', {
+        start: openBracketPos,
+        end: lastTokenEnd
+      });
     } else {
       this.advance(); // 」を消費
     }
