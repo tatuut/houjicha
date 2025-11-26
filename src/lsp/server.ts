@@ -720,7 +720,30 @@ connection.onCodeAction((params: CodeActionParams): CodeAction[] => {
       }
     }
 
-    // 5. 論点推奨への対応
+    // 5. 孤立した要件・規範・論点への対応（主張で囲む提案）
+    if (diagnostic.message.includes('主張（#）の内部に記述してください') ||
+        diagnostic.message.includes('主張（#）の後に記述してください') ||
+        diagnostic.message.includes('主張（#）または名前空間（::）の内部に記述してください')) {
+      // 前の行に主張を追加する提案
+      actions.push({
+        title: '主張を追加して囲む',
+        kind: CodeActionKind.QuickFix,
+        diagnostics: [diagnostic],
+        edit: {
+          changes: {
+            [params.textDocument.uri]: [{
+              range: {
+                start: { line: diagLine, character: 0 },
+                end: { line: diagLine, character: 0 },
+              },
+              newText: '#【主張名】^【条文番号】 <= 【事実】:\n',
+            }],
+          },
+        },
+      });
+    }
+
+    // 6. 論点推奨への対応
     if (diagnostic.message.includes('論点') && diagnostic.message.includes('推奨')) {
       const issueMatch = diagnostic.message.match(/「([^」]+)」/);
       if (issueMatch) {

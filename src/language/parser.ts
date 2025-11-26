@@ -116,6 +116,26 @@ export class Parser {
       } else if (this.check(TokenType.SEMICOLON)) {
         // トップレベルの理由文はスキップ（Claimに属さない）
         this.parseReasonStatement();
+      } else if (this.check(TokenType.INDENT)) {
+        // 孤立したインデント（主張の外にある要件など）
+        this.addError('インデントされた内容は主張（#）または名前空間（::）の内部に記述してください');
+        this.skipOrphanedIndentedBlock();
+      } else if (this.check(TokenType.LBRACKET_JP)) {
+        // トップレベルの「」は許可されない
+        this.addError('要件「」は主張（#）の内部に記述してください');
+        this.skipUntilNewline();
+      } else if (this.check(TokenType.PERCENT)) {
+        // トップレベルの%は許可されない
+        this.addError('規範（%）は主張（#）の内部に記述してください');
+        this.skipUntilNewline();
+      } else if (this.check(TokenType.QUESTION)) {
+        // トップレベルの?は許可されない
+        this.addError('論点（?）は主張（#）の内部に記述してください');
+        this.skipUntilNewline();
+      } else if (this.check(TokenType.ARROW_RIGHT)) {
+        // トップレベルの>>は許可されない
+        this.addError('効果（>>）は主張（#）の後に記述してください');
+        this.skipUntilNewline();
       } else {
         this.addError(`予期しないトークン: ${this.peek().type}`);
         this.advance();
@@ -129,6 +149,30 @@ export class Parser {
       constants: this.constants,
       range: this.createRange(startPos, endPos)
     };
+  }
+
+  // 孤立したインデントブロックをスキップ
+  private skipOrphanedIndentedBlock(): void {
+    this.advance(); // INDENT
+    let depth = 1;
+    while (!this.isAtEnd() && depth > 0) {
+      if (this.check(TokenType.INDENT)) {
+        depth++;
+      } else if (this.check(TokenType.DEDENT)) {
+        depth--;
+      }
+      this.advance();
+    }
+  }
+
+  // 行末までスキップ
+  private skipUntilNewline(): void {
+    while (!this.isAtEnd() && !this.check(TokenType.NEWLINE)) {
+      this.advance();
+    }
+    if (this.check(TokenType.NEWLINE)) {
+      this.advance();
+    }
   }
 
   // ===== 論述空間（Namespace）解析 =====
@@ -457,10 +501,18 @@ export class Parser {
 
     // 要件名を取得
     let name = '';
-    while (!this.isAtEnd() && !this.check(TokenType.RBRACKET_JP)) {
+    while (!this.isAtEnd() &&
+           !this.check(TokenType.RBRACKET_JP) &&
+           !this.check(TokenType.NEWLINE)) {
       name += this.advance().value;
     }
-    this.expect(TokenType.RBRACKET_JP, '要件の終わりに」が必要です');
+
+    // 閉じ括弧がない場合のエラー
+    if (this.check(TokenType.NEWLINE) || this.isAtEnd()) {
+      this.addError('閉じ括弧「」」が見つかりません');
+    } else {
+      this.advance(); // 」を消費
+    }
 
     let norm: Norm | undefined;
     let fact: Fact | undefined;
