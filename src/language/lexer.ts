@@ -339,9 +339,8 @@ export class Lexer {
 
     this.atLineStart = false;
 
-    // 空行やコメントのみの行はインデント処理をスキップ
-    if (this.peek() === '\n' || this.peek() === '\r' ||
-        (this.peek() === '/' && this.peek(1) === '/')) {
+    // 空行のみインデント処理をスキップ（コメント行はインデント処理を行う）
+    if (this.peek() === '\n' || this.peek() === '\r') {
       return;
     }
 
