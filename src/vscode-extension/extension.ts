@@ -32,14 +32,14 @@ class HoujichaInlineCompletionProvider implements vscode.InlineCompletionItemPro
     const textBeforeCursor = lineText.substring(0, position.character);
 
     // 補完をトリガーする条件をチェック
-    // 「」は自動閉じ括弧と競合するため除外
     const shouldTrigger =
+      textBeforeCursor.endsWith('*') ||
+      textBeforeCursor.endsWith('＊') ||
       textBeforeCursor.endsWith('%') ||
       textBeforeCursor.endsWith('?') ||
       textBeforeCursor.endsWith('？') ||
       textBeforeCursor.endsWith('$') ||
-      textBeforeCursor.endsWith('#') ||
-      (textBeforeCursor.match(/^\s+$/) && textBeforeCursor.length >= 4); // インデント行
+      textBeforeCursor.endsWith('#');
 
     if (!shouldTrigger) {
       return null;

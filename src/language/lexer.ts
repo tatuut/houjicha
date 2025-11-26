@@ -32,8 +32,9 @@ export enum TokenType {
   // 括弧類
   LPAREN = 'LPAREN',                 // ( または （
   RPAREN = 'RPAREN',                 // ) または ）
-  LBRACKET_JP = 'LBRACKET_JP',       // 「
-  RBRACKET_JP = 'RBRACKET_JP',       // 」
+  LBRACKET_JP = 'LBRACKET_JP',       // 「 (後方互換)
+  RBRACKET_JP = 'RBRACKET_JP',       // 」 (後方互換)
+  ASTERISK = 'ASTERISK',             // * 要件マーカー
 
   // キーワード
   AS = 'AS',                         // as 定数定義
@@ -293,6 +294,11 @@ export class Lexer {
         this.addToken(TokenType.RBRACKET_JP, char, startPos);
         break;
 
+      case '*':
+      case '＊':
+        this.addToken(TokenType.ASTERISK, char, startPos);
+        break;
+
       case '$':
       case '＄':
         this.addToken(TokenType.DOLLAR, char, startPos);
@@ -396,6 +402,7 @@ export class Lexer {
       '%', '％', '@', '＠', '~', '=', '&', '＆', '|', '｜',
       '+', '＋', '!', '！', '(', '（', ')', '）',
       '「', '」', '$', '＄', '/', '\\', ';', '；',
+      '*', '＊',  // 要件マーカー
       ' ', '\t', '\u3000'
     ];
     return specialChars.includes(char);

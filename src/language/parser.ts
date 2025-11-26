@@ -120,9 +120,9 @@ export class Parser {
         // 孤立したインデント（主張の外にある要件など）
         this.addError('インデントされた内容は主張（#）または名前空間（::）の内部に記述してください');
         this.skipOrphanedIndentedBlock();
-      } else if (this.check(TokenType.LBRACKET_JP)) {
-        // トップレベルの「」は許可されない
-        this.addError('要件「」は主張（#）の内部に記述してください');
+      } else if (this.check(TokenType.LBRACKET_JP) || this.check(TokenType.ASTERISK)) {
+        // トップレベルの要件は許可されない
+        this.addError('要件は主張（#）の内部に記述してください');
         this.skipUntilNewline();
       } else if (this.check(TokenType.PERCENT)) {
         // トップレベルの%は許可されない
@@ -303,22 +303,22 @@ export class Parser {
       this.advance();
 
       while (!this.isAtEnd() && !this.check(TokenType.DEDENT)) {
-        if (this.check(TokenType.LBRACKET_JP)) {
+        if (this.check(TokenType.LBRACKET_JP) || this.check(TokenType.ASTERISK)) {
           requirements.push(this.parseRequirement());
         } else if (this.check(TokenType.PERCENT) ||
                    this.check(TokenType.DOLLAR) ||
                    (this.check(TokenType.PLUS) && (this.peek(1).type === TokenType.PERCENT || this.peek(1).type === TokenType.DOLLAR)) ||
-                   (this.check(TokenType.PLUS) && this.peek(1).type === TokenType.LBRACKET_JP) ||
+                   (this.check(TokenType.PLUS) && (this.peek(1).type === TokenType.LBRACKET_JP || this.peek(1).type === TokenType.ASTERISK)) ||
                    (this.check(TokenType.EXCLAIM) && (this.peek(1).type === TokenType.PERCENT || this.peek(1).type === TokenType.DOLLAR)) ||
-                   (this.check(TokenType.EXCLAIM) && this.peek(1).type === TokenType.LBRACKET_JP)) {
-          // +% or !% or +「 or !「 or +$ or !$ or $ or %
-          if (this.peek(1).type === TokenType.LBRACKET_JP) {
+                   (this.check(TokenType.EXCLAIM) && (this.peek(1).type === TokenType.LBRACKET_JP || this.peek(1).type === TokenType.ASTERISK))) {
+          // +% or !% or +「 or !「 or +* or !* or +$ or !$ or $ or %
+          if (this.peek(1).type === TokenType.LBRACKET_JP || this.peek(1).type === TokenType.ASTERISK) {
             requirements.push(this.parseRequirement());
           } else {
             requirements.push(this.parseNormAsRequirement());
           }
         } else if (this.check(TokenType.PLUS) || this.check(TokenType.EXCLAIM)) {
-          // 単独の + or ! の後に % か $ か 「 が来る場合
+          // 単独の + or ! の後に % か $ か 「 か * が来る場合
           requirements.push(this.parseNormAsRequirement());
         } else if (this.check(TokenType.QUESTION)) {
           requirements.push(this.parseIssueAsRequirement());
@@ -498,28 +498,45 @@ export class Parser {
       concluded = 'negative';
     }
 
-    const openBracket = this.expect(TokenType.LBRACKET_JP, '要件には「が必要です');
-    const openBracketPos = openBracket.range.start;
+    // * による要件マーカー（新構文）
+    const useAsterisk = this.check(TokenType.ASTERISK);
 
-    // 要件名を取得
     let name = '';
-    let lastTokenEnd = openBracket.range.end;
-    while (!this.isAtEnd() &&
-           !this.check(TokenType.RBRACKET_JP) &&
-           !this.check(TokenType.NEWLINE)) {
-      const token = this.advance();
-      name += token.value;
-      lastTokenEnd = token.range.end;
-    }
+    if (useAsterisk) {
+      this.advance(); // * を消費
 
-    // 閉じ括弧がない場合のエラー（開き括弧の位置でエラーを報告）
-    if (this.check(TokenType.NEWLINE) || this.isAtEnd()) {
-      this.addError('閉じ括弧「」」が見つかりません', {
-        start: openBracketPos,
-        end: lastTokenEnd
-      });
+      // 要件名を取得（: か <= か 改行まで）
+      while (!this.isAtEnd() &&
+             !this.check(TokenType.COLON) &&
+             !this.check(TokenType.ARROW_LEFT) &&
+             !this.check(TokenType.NEWLINE)) {
+        name += this.advance().value + ' ';
+      }
+      name = name.trim();
     } else {
-      this.advance(); // 」を消費
+      // 「」による要件マーカー（従来構文）
+      const openBracket = this.expect(TokenType.LBRACKET_JP, '要件には * か「が必要です');
+      const openBracketPos = openBracket.range.start;
+
+      // 要件名を取得
+      let lastTokenEnd = openBracket.range.end;
+      while (!this.isAtEnd() &&
+             !this.check(TokenType.RBRACKET_JP) &&
+             !this.check(TokenType.NEWLINE)) {
+        const token = this.advance();
+        name += token.value;
+        lastTokenEnd = token.range.end;
+      }
+
+      // 閉じ括弧がない場合のエラー（開き括弧の位置でエラーを報告）
+      if (this.check(TokenType.NEWLINE) || this.isAtEnd()) {
+        this.addError('閉じ括弧「」」が見つかりません', {
+          start: openBracketPos,
+          end: lastTokenEnd
+        });
+      } else {
+        this.advance(); // 」を消費
+      }
     }
 
     let norm: Norm | undefined;
@@ -558,9 +575,9 @@ export class Parser {
             (this.check(TokenType.PLUS) && (this.peek(1).type === TokenType.PERCENT || this.peek(1).type === TokenType.DOLLAR)) ||
             (this.check(TokenType.EXCLAIM) && (this.peek(1).type === TokenType.PERCENT || this.peek(1).type === TokenType.DOLLAR))) {
           subRequirements.push(this.parseNormAsRequirement());
-        } else if (this.check(TokenType.LBRACKET_JP) ||
-                   (this.check(TokenType.PLUS) && this.peek(1).type === TokenType.LBRACKET_JP) ||
-                   (this.check(TokenType.EXCLAIM) && this.peek(1).type === TokenType.LBRACKET_JP)) {
+        } else if (this.check(TokenType.LBRACKET_JP) || this.check(TokenType.ASTERISK) ||
+                   (this.check(TokenType.PLUS) && (this.peek(1).type === TokenType.LBRACKET_JP || this.peek(1).type === TokenType.ASTERISK)) ||
+                   (this.check(TokenType.EXCLAIM) && (this.peek(1).type === TokenType.LBRACKET_JP || this.peek(1).type === TokenType.ASTERISK))) {
           subRequirements.push(this.parseRequirement());
         } else if (this.check(TokenType.ARROW_LEFT)) {
           // 下位のあてはめ
@@ -616,9 +633,9 @@ export class Parser {
             (this.check(TokenType.PLUS) && (this.peek(1).type === TokenType.PERCENT || this.peek(1).type === TokenType.DOLLAR)) ||
             (this.check(TokenType.EXCLAIM) && (this.peek(1).type === TokenType.PERCENT || this.peek(1).type === TokenType.DOLLAR))) {
           subRequirements.push(this.parseNormAsRequirement());
-        } else if (this.check(TokenType.LBRACKET_JP) ||
-                   (this.check(TokenType.PLUS) && this.peek(1).type === TokenType.LBRACKET_JP) ||
-                   (this.check(TokenType.EXCLAIM) && this.peek(1).type === TokenType.LBRACKET_JP)) {
+        } else if (this.check(TokenType.LBRACKET_JP) || this.check(TokenType.ASTERISK) ||
+                   (this.check(TokenType.PLUS) && (this.peek(1).type === TokenType.LBRACKET_JP || this.peek(1).type === TokenType.ASTERISK)) ||
+                   (this.check(TokenType.EXCLAIM) && (this.peek(1).type === TokenType.LBRACKET_JP || this.peek(1).type === TokenType.ASTERISK))) {
           subRequirements.push(this.parseRequirement());
         } else if (this.check(TokenType.ARROW_LEFT)) {
           // あてはめを規範に追加
