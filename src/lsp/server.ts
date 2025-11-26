@@ -328,10 +328,18 @@ connection.onCompletion((params: TextDocumentPositionParams): CompletionItem[] =
   const document = documents.get(params.textDocument.uri);
   if (!document) return [];
 
+  // 補完時にもDBが空なら読み込みを試みる
+  if (articleDatabase.articles.size === 0) {
+    connection.console.log('[補完] DB空のため再読み込み試行');
+    tryLoadDatabaseFromDocument(document);
+  }
+
   const text = document.getText();
   const offset = document.offsetAt(params.position);
   const lineText = text.substring(text.lastIndexOf('\n', offset - 1) + 1, offset);
   const items: CompletionItem[] = [];
+
+  connection.console.log(`[補完開始] offset=${offset}, lineText="${lineText}", DB=${articleDatabase.articles.size}件`);
 
   // # の後：条文データベースから罪名・法的概念
   if (lineText.endsWith('#') || lineText.match(/#\S*$/)) {
@@ -404,7 +412,13 @@ connection.onCompletion((params: TextDocumentPositionParams): CompletionItem[] =
   }
 
   // 「の後：要件名（条文データベースから、条文順でソート）
-  if (lineText.endsWith('「')) {
+  // endsWith だけでなく、最後の文字が「かどうかもチェック
+  const lastChar = lineText.trim().slice(-1);
+  const has開括弧 = lineText.endsWith('「') || lastChar === '「' || lineText.includes('「') && !lineText.includes('」');
+
+  connection.console.log(`[補完デバッグ] lineText="${lineText}", lastChar="${lastChar}", has開括弧=${has開括弧}`);
+
+  if (has開括弧) {
     const currentClaim = findCurrentClaim(text, offset);
     connection.console.log(`[補完] 現在の主張: ${currentClaim}, DB件数: ${articleDatabase.articles.size}`);
 
@@ -428,14 +442,24 @@ connection.onCompletion((params: TextDocumentPositionParams): CompletionItem[] =
 
         let sortOrder = 0;
         for (const annotation of article.アノテーション) {
-          if (annotation.範囲 && annotation.種別 === '要件') {
+          // 範囲があるか、nameがある要件をすべて補完候補に
+          const reqName = annotation.範囲 || annotation.name;
+          if (reqName && (annotation.種別 === '要件' || annotation.種別 === '論点')) {
             sortOrder++;
-            const isWritten = writtenReqs.has(annotation.範囲);
+            const isWritten = writtenReqs.has(reqName);
 
             // Markdown形式の詳細説明を構築
             let docContent = isWritten
-              ? `## ✓「${annotation.範囲}」（記述済み）\n\n`
-              : `## 「${annotation.範囲}」\n\n`;
+              ? `## ✓「${reqName}」（記述済み）\n\n`
+              : `## 「${reqName}」\n\n`;
+
+            // 種別を表示
+            if (annotation.種別 === '論点') {
+              docContent += `**論点（不文の要件）**\n\n`;
+              if (annotation.理由) {
+                docContent += `_${annotation.理由}_\n\n`;
+              }
+            }
 
             // 規範
             if (annotation.解釈 && annotation.解釈.length > 0) {
@@ -470,24 +494,42 @@ connection.onCompletion((params: TextDocumentPositionParams): CompletionItem[] =
               }
             }
 
-            items.push({
-              label: (isWritten ? '✓ ' : '') + annotation.範囲 + '」',
-              kind: CompletionItemKind.Property,
-              detail: annotation.解釈?.[0]?.規範 || '構成要件',
-              documentation: {
-                kind: MarkupKind.Markdown,
-                value: docContent,
-              },
-              // 未記述を上位に、条文順でソート
-              sortText: `${isWritten ? '1' : '0'}-${String(sortOrder).padStart(2, '0')}`,
-              // 補完後のスニペット（規範があれば行内複合構文を提案）
-              insertText: annotation.解釈?.[0]?.規範
-                ? `${annotation.範囲}」: %${annotation.解釈[0].規範} <= `
-                : `${annotation.範囲}」 <= `,
-              insertTextFormat: InsertTextFormat.PlainText,
-            });
+            // 要件は「」で、論点（不文の要件）は%で補完
+            if (annotation.種別 === '要件' && annotation.範囲) {
+              items.push({
+                label: (isWritten ? '✓ ' : '') + reqName + '」',
+                kind: CompletionItemKind.Property,
+                detail: annotation.解釈?.[0]?.規範 || '構成要件',
+                documentation: {
+                  kind: MarkupKind.Markdown,
+                  value: docContent,
+                },
+                sortText: `${isWritten ? '1' : '0'}-${String(sortOrder).padStart(2, '0')}`,
+                insertText: annotation.解釈?.[0]?.規範
+                  ? `${reqName}」: %${annotation.解釈[0].規範} <= `
+                  : `${reqName}」 <= `,
+                insertTextFormat: InsertTextFormat.PlainText,
+              });
+            } else {
+              // 論点や name のみの要件は %規範 形式で補完
+              const norm = annotation.解釈?.[0]?.規範 || reqName;
+              items.push({
+                label: (isWritten ? '✓ ' : '') + reqName + '」',
+                kind: CompletionItemKind.Property,
+                detail: `${annotation.種別}：${norm}`,
+                documentation: {
+                  kind: MarkupKind.Markdown,
+                  value: docContent,
+                },
+                sortText: `${isWritten ? '1' : '0'}-${String(sortOrder).padStart(2, '0')}`,
+                // 閉じ括弧の後に規範を追加（論点は%で書くことが多い）
+                insertText: `${reqName}」: %${norm} <= `,
+                insertTextFormat: InsertTextFormat.PlainText,
+              });
+            }
           }
         }
+        connection.console.log(`[補完] ${items.length}件の要件候補を生成`);
       } else {
         // 条文が見つからない場合のフォールバック
         connection.console.log(`[補完] フォールバック: 条文未発見 (主張=${currentClaim})`);
