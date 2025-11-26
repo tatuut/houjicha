@@ -714,13 +714,21 @@ export class Parser {
       fact = this.parseFact();
     }
 
-    // 定数定義
+    // 定数定義（as 定数名）
     if (this.match(TokenType.AS)) {
       let constName = '';
-      while (!this.isAtEnd() && !this.check(TokenType.NEWLINE)) {
+      // <= が来たら定数名の終わり
+      while (!this.isAtEnd() &&
+             !this.check(TokenType.ARROW_LEFT) &&
+             !this.check(TokenType.NEWLINE)) {
         constName += this.advance().value + ' ';
       }
       constantDefinition = constName.trim();
+
+      // as の後にあてはめがある場合
+      if (this.match(TokenType.ARROW_LEFT)) {
+        fact = this.parseFact();
+      }
 
       // 定数を登録
       const norm: Norm = {

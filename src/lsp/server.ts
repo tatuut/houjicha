@@ -30,6 +30,8 @@ import {
   ExecuteCommandParams,
   TextEdit,
   InsertTextFormat,
+  Definition,
+  Location,
 } from 'vscode-languageserver/node';
 
 import { TextDocument } from 'vscode-languageserver-textdocument';
@@ -102,6 +104,7 @@ connection.onInitialize((params: InitializeParams): InitializeResult => {
         triggerCharacters: ['#', '%', '「', '^', '@', '$', '?', ':', '/'],
       },
       hoverProvider: true,
+      definitionProvider: true,
       documentSymbolProvider: true,
       foldingRangeProvider: true,
       semanticTokensProvider: { legend, full: true },
@@ -369,16 +372,35 @@ connection.onCompletion((params: TextDocumentPositionParams): CompletionItem[] =
     }
   }
 
-  // 「の後：要件名（条文データベースから）
+  // 「の後：要件名（条文データベースから、条文順でソート）
   if (lineText.endsWith('「')) {
     const currentClaim = findCurrentClaim(text, offset);
     if (currentClaim) {
       const article = findArticle(articleDatabase, currentClaim);
       if (article) {
+        // 既に書かれている要件を収集
+        const cached = documentCache.get(params.textDocument.uri);
+        const writtenReqs = new Set<string>();
+        if (cached) {
+          for (const child of cached.document.children) {
+            if (child.type === 'Claim') {
+              for (const req of child.requirements) {
+                writtenReqs.add(req.name);
+              }
+            }
+          }
+        }
+
+        let sortOrder = 0;
         for (const annotation of article.アノテーション) {
           if (annotation.範囲 && annotation.種別 === '要件') {
+            sortOrder++;
+            const isWritten = writtenReqs.has(annotation.範囲);
+
             // Markdown形式の詳細説明を構築
-            let docContent = `## 「${annotation.範囲}」\n\n`;
+            let docContent = isWritten
+              ? `## ✓「${annotation.範囲}」（記述済み）\n\n`
+              : `## 「${annotation.範囲}」\n\n`;
 
             // 規範
             if (annotation.解釈 && annotation.解釈.length > 0) {
@@ -414,13 +436,15 @@ connection.onCompletion((params: TextDocumentPositionParams): CompletionItem[] =
             }
 
             items.push({
-              label: annotation.範囲 + '」',
+              label: (isWritten ? '✓ ' : '') + annotation.範囲 + '」',
               kind: CompletionItemKind.Property,
               detail: annotation.解釈?.[0]?.規範 || '構成要件',
               documentation: {
                 kind: MarkupKind.Markdown,
                 value: docContent,
               },
+              // 未記述を上位に、条文順でソート
+              sortText: `${isWritten ? '1' : '0'}-${String(sortOrder).padStart(2, '0')}`,
               // 補完後のスニペット（規範があれば行内複合構文を提案）
               insertText: annotation.解釈?.[0]?.規範
                 ? `${annotation.範囲}」: %${annotation.解釈[0].規範} <= `
@@ -433,18 +457,38 @@ connection.onCompletion((params: TextDocumentPositionParams): CompletionItem[] =
     }
   }
 
-  // ? の後：論点（条文データベースから）
+  // ? の後：論点（条文データベースから、未検討を優先）
   if (lineText.endsWith('?') || lineText.endsWith('？')) {
     const currentClaim = findCurrentClaim(text, offset);
     if (currentClaim) {
       const article = findArticle(articleDatabase, currentClaim);
       if (article) {
+        // 既に書かれている論点を収集
+        const cached = documentCache.get(params.textDocument.uri);
+        const writtenIssues = new Set<string>();
+        if (cached) {
+          for (const child of cached.document.children) {
+            if (child.type === 'Claim') {
+              for (const req of child.requirements) {
+                if (req.issue?.question) {
+                  writtenIssues.add(req.issue.question);
+                }
+              }
+            }
+          }
+        }
+
         const issues = getIssues(article);
+        let sortOrder = 0;
         for (const { annotation, issue } of issues) {
+          sortOrder++;
           const norm = issue.解釈[0]?.規範 || '';
+          const isWritten = writtenIssues.has(issue.問題);
 
           // Markdown形式の詳細説明を構築
-          let docContent = `## 論点: ${issue.問題}\n\n`;
+          let docContent = isWritten
+            ? `## ✓ 論点: ${issue.問題}（検討済み）\n\n`
+            : `## ⚠️ 論点: ${issue.問題}（未検討）\n\n`;
           if (issue.理由) {
             docContent += `**問題の所在**: ${issue.理由}\n\n`;
           }
@@ -461,13 +505,15 @@ connection.onCompletion((params: TextDocumentPositionParams): CompletionItem[] =
           }
 
           items.push({
-            label: ` ${issue.問題} ~> ${issue.理由 || '【理由】'} => %${norm}`,
+            label: (isWritten ? '✓ ' : '⚠️ ') + ` ${issue.問題} ~> ${issue.理由 || '【理由】'} => %${norm}`,
             kind: CompletionItemKind.Snippet,
-            detail: `論点: ${issue.問題}`,
+            detail: isWritten ? `✓ 検討済み` : `⚠️ 未検討`,
             documentation: {
               kind: MarkupKind.Markdown,
               value: docContent,
             },
+            // 未検討を上位に
+            sortText: `${isWritten ? '1' : '0'}-${String(sortOrder).padStart(2, '0')}`,
             insertText: ` ${issue.問題} ~> ${issue.理由 || '【理由】'} => %${norm}`,
             insertTextFormat: InsertTextFormat.PlainText,
           });
@@ -703,6 +749,35 @@ connection.onHover((params: TextDocumentPositionParams): Hover | null => {
     }
   }
 
+  // $定数参照のホバー：定義内容を表示
+  const constMatch = line.match(/\$([^\s<=:]+)/);
+  if (constMatch) {
+    const constName = constMatch[1];
+    const constIndex = line.indexOf(constMatch[0]);
+    if (position.character >= constIndex && position.character <= constIndex + constMatch[0].length) {
+      const cached = documentCache.get(params.textDocument.uri);
+      if (cached) {
+        const constDef = cached.document.constants.get(constName);
+        if (constDef) {
+          let content = `## 定数: ${constName}\n\n`;
+          content += `### 規範\n\`\`\`\n${constDef.value.content}\n\`\`\`\n\n`;
+          if (constDef.value.reference) {
+            content += `**根拠条文**: ${constDef.value.reference.citation}\n\n`;
+          }
+          content += `**定義位置**: ${constDef.range.start.line + 1}行目`;
+          return { contents: { kind: MarkupKind.Markdown, value: content } };
+        } else {
+          return {
+            contents: {
+              kind: MarkupKind.Markdown,
+              value: `## ⚠️ 未定義の定数\n\n\`${constName}\` は定義されていません。\n\n\`as ${constName}\` で定義してください。`,
+            },
+          };
+        }
+      }
+    }
+  }
+
   // 記号のホバー情報
   const hoverInfo: { [key: string]: { title: string; description: string } } = {
     '#': { title: '主張（Claim）', description: '法的主張を示します。' },
@@ -727,6 +802,52 @@ connection.onHover((params: TextDocumentPositionParams): Hover | null => {
           value: `## ${info.title}\n\n${info.description}`,
         },
       };
+    }
+  }
+
+  return null;
+});
+
+// Go to Definition（$定数の定義元へジャンプ）
+connection.onDefinition((params: TextDocumentPositionParams): Definition | null => {
+  const document = documents.get(params.textDocument.uri);
+  if (!document) return null;
+
+  const position = params.position;
+  const text = document.getText();
+  const lines = text.split('\n');
+  const line = lines[position.line] || '';
+
+  // $定数参照の定義元を探す
+  const constMatch = line.match(/\$([^\s<=:]+)/);
+  if (constMatch) {
+    const constName = constMatch[1];
+    const constIndex = line.indexOf(constMatch[0]);
+    if (position.character >= constIndex && position.character <= constIndex + constMatch[0].length) {
+      const cached = documentCache.get(params.textDocument.uri);
+      if (cached) {
+        const constDef = cached.document.constants.get(constName);
+        if (constDef) {
+          return Location.create(params.textDocument.uri, {
+            start: { line: constDef.range.start.line, character: constDef.range.start.column },
+            end: { line: constDef.range.end.line, character: constDef.range.end.column },
+          });
+        }
+      }
+    }
+  }
+
+  // as 定数名 の定義元（定義自体）
+  const asMatch = line.match(/as\s+([^\s<=]+)/);
+  if (asMatch) {
+    const constName = asMatch[1];
+    const asIndex = line.indexOf(asMatch[0]);
+    if (position.character >= asIndex && position.character <= asIndex + asMatch[0].length) {
+      // 定義自体なので、この行を返す
+      return Location.create(params.textDocument.uri, {
+        start: { line: position.line, character: asIndex },
+        end: { line: position.line, character: asIndex + asMatch[0].length },
+      });
     }
   }
 
