@@ -442,7 +442,224 @@ export function activate(context: ExtensionContext) {
     treeProvider.refresh();
   });
 
-  context.subscriptions.push(treeView, treeRefreshDisposable, fileWatcher, openLocationCommand, refreshCommand);
+  // 記号早見表コマンド
+  const symbolGuideCommand = vscode.commands.registerCommand('houjicha.showSymbolGuide', () => {
+    const panel = vscode.window.createWebviewPanel(
+      'houjichaSymbolGuide',
+      'ほうじ茶 記号早見表',
+      vscode.ViewColumn.Beside,
+      { enableScripts: false }
+    );
+
+    panel.webview.html = `
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ほうじ茶 記号早見表</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            padding: 20px;
+            background: var(--vscode-editor-background);
+            color: var(--vscode-editor-foreground);
+        }
+        h1 {
+            font-size: 1.5em;
+            border-bottom: 2px solid var(--vscode-textLink-foreground);
+            padding-bottom: 10px;
+            margin-bottom: 20px;
+        }
+        h2 {
+            font-size: 1.2em;
+            margin-top: 25px;
+            margin-bottom: 10px;
+            color: var(--vscode-textLink-foreground);
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+        }
+        th, td {
+            padding: 10px 12px;
+            text-align: left;
+            border-bottom: 1px solid var(--vscode-panel-border);
+        }
+        th {
+            background: var(--vscode-editor-selectionBackground);
+            font-weight: 600;
+        }
+        code {
+            background: var(--vscode-textCodeBlock-background);
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Consolas', 'Courier New', monospace;
+            font-size: 1.1em;
+        }
+        .symbol {
+            font-size: 1.3em;
+            font-weight: bold;
+            color: var(--vscode-symbolIcon-functionForeground);
+        }
+        .shortcut {
+            background: var(--vscode-button-background);
+            color: var(--vscode-button-foreground);
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 0.85em;
+        }
+        .description {
+            color: var(--vscode-descriptionForeground);
+            font-size: 0.9em;
+        }
+    </style>
+</head>
+<body>
+    <h1>ほうじ茶 記号早見表</h1>
+
+    <h2>基本構文</h2>
+    <table>
+        <tr>
+            <th>記号</th>
+            <th>意味</th>
+            <th>使用例</th>
+        </tr>
+        <tr>
+            <td class="symbol">#</td>
+            <td>主張（罪名・請求原因）</td>
+            <td><code>#窃盗罪^刑法235条</code></td>
+        </tr>
+        <tr>
+            <td class="symbol">*</td>
+            <td>要件（構成要件）</td>
+            <td><code>*他人の財物</code></td>
+        </tr>
+        <tr>
+            <td class="symbol">%</td>
+            <td>規範（定義・解釈）</td>
+            <td><code>%占有者の意思に反して</code></td>
+        </tr>
+        <tr>
+            <td class="symbol">?</td>
+            <td>論点（問題提起）</td>
+            <td><code>? 財物の意義</code></td>
+        </tr>
+        <tr>
+            <td class="symbol">&lt;=</td>
+            <td>あてはめ（事実の適用）</td>
+            <td><code>&lt;= 本件時計は...</code></td>
+        </tr>
+        <tr>
+            <td class="symbol">&gt;&gt;</td>
+            <td>効果（最終結論）</td>
+            <td><code>&gt;&gt; 甲に窃盗罪が成立</code></td>
+        </tr>
+    </table>
+
+    <h2>補助記号</h2>
+    <table>
+        <tr>
+            <th>記号</th>
+            <th>意味</th>
+            <th>使用例</th>
+        </tr>
+        <tr>
+            <td class="symbol">^</td>
+            <td>条文参照</td>
+            <td><code>^刑法235条</code></td>
+        </tr>
+        <tr>
+            <td class="symbol">::</td>
+            <td>論述空間（名前空間）</td>
+            <td><code>::甲の罪責</code></td>
+        </tr>
+        <tr>
+            <td class="symbol">~&gt;</td>
+            <td>理由（論点内）</td>
+            <td><code>~&gt; なぜなら...</code></td>
+        </tr>
+        <tr>
+            <td class="symbol">=&gt;</td>
+            <td>帰結（結論の導出）</td>
+            <td><code>=&gt; %規範</code></td>
+        </tr>
+        <tr>
+            <td class="symbol">@</td>
+            <td>評価（事実の評価）</td>
+            <td><code>@悪質 @計画的</code></td>
+        </tr>
+        <tr>
+            <td class="symbol">$</td>
+            <td>定数参照</td>
+            <td><code>$不法領得</code></td>
+        </tr>
+    </table>
+
+    <h2>結論・メモ</h2>
+    <table>
+        <tr>
+            <th>記号</th>
+            <th>意味</th>
+            <th>使用例</th>
+        </tr>
+        <tr>
+            <td class="symbol">+</td>
+            <td>該当（要件充足）</td>
+            <td><code>+*他人の財物</code></td>
+        </tr>
+        <tr>
+            <td class="symbol">!</td>
+            <td>否定（要件不充足）</td>
+            <td><code>!*不法領得の意思</code></td>
+        </tr>
+        <tr>
+            <td class="symbol">;</td>
+            <td>理由文（論理展開）</td>
+            <td><code>; なぜなら〜だから</code></td>
+        </tr>
+        <tr>
+            <td class="symbol">∵</td>
+            <td>思考過程メモ</td>
+            <td><code>∵ 検討ポイント</code></td>
+        </tr>
+    </table>
+
+    <h2>キーボードショートカット</h2>
+    <table>
+        <tr>
+            <th>ショートカット</th>
+            <th>機能</th>
+        </tr>
+        <tr>
+            <td><span class="shortcut">Ctrl+Shift+V</span></td>
+            <td>プレビューを開く</td>
+        </tr>
+        <tr>
+            <td><span class="shortcut">Ctrl+Shift+H</span></td>
+            <td>この記号早見表を表示</td>
+        </tr>
+        <tr>
+            <td><span class="shortcut">Ctrl+Space</span></td>
+            <td>補完候補を表示</td>
+        </tr>
+        <tr>
+            <td><span class="shortcut">Tab</span></td>
+            <td>Ghost補完を確定</td>
+        </tr>
+    </table>
+
+    <p class="description">
+        <strong>Tip:</strong> <code>~</code>, <code>=</code>, <code>&lt;</code>, <code>&gt;</code>, <code>:</code> を入力すると、
+        Ghost補完（薄い文字）でペアの記号が表示されます。Tabで確定できます。
+    </p>
+</body>
+</html>
+    `;
+  });
+
+  context.subscriptions.push(treeView, treeRefreshDisposable, fileWatcher, openLocationCommand, refreshCommand, symbolGuideCommand);
 }
 
 export function deactivate(): Thenable<void> | undefined {

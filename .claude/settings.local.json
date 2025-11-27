@@ -10,7 +10,9 @@
       "Bash(npx vsce package --allow-missing-repository)",
       "Bash(npm install:*)",
       "Bash(code --install-extension:*)",
-      "Bash(code --list-extensions)"
+      "Bash(code --list-extensions)",
+      "Bash(git push)",
+      "Bash(node:*)"
     ],
     "deny": [],
     "ask": []

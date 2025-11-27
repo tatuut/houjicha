@@ -4,6 +4,10 @@
   "description": "法的推論のための形式言語「ほうじ茶」のLanguage Server Protocol実装",
   "version": "0.1.0",
   "publisher": "houjicha-lang",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tatuut/houjicha.git"
+  },
   "engines": {
     "vscode": "^1.75.0"
   },
@@ -38,6 +42,11 @@
         "command": "houjicha.openPreview",
         "title": "ほうじ茶: プレビューを開く",
         "icon": "$(open-preview)"
+      },
+      {
+        "command": "houjicha.showSymbolGuide",
+        "title": "ほうじ茶: 記号早見表を表示",
+        "icon": "$(info)"
       }
     ],
     "menus": {
@@ -52,6 +61,10 @@
         {
           "when": "resourceLangId == houjicha",
           "command": "houjicha.openPreview"
+        },
+        {
+          "when": "resourceLangId == houjicha",
+          "command": "houjicha.showSymbolGuide"
         }
       ]
     },
@@ -60,6 +73,12 @@
         "command": "houjicha.openPreview",
         "key": "ctrl+shift+v",
         "mac": "cmd+shift+v",
+        "when": "resourceLangId == houjicha"
+      },
+      {
+        "command": "houjicha.showSymbolGuide",
+        "key": "ctrl+shift+h",
+        "mac": "cmd+shift+h",
         "when": "resourceLangId == houjicha"
       }
     ],
