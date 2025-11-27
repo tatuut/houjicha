@@ -225,9 +225,12 @@ AIが先読みして補完候補を提案し、人間がTabで承認する。
 
 ### サンプルファイルで体験！
 
-まずはサンプルファイルを開いて、どんな感じか体験してみてください：
+まずはサンプルファイルを開いて、実際に手を動かしてみてください：
 
-- [demo-new-features.houjicha](./examples/demo-new-features.houjicha) - 新機能（∵思考過程メモ、複数@評価）のデモ
+- [demo-try-commands.houjicha](./examples/demo-try-commands.houjicha) - **まずはこれ！** 補完機能を試せるファイル
+
+完成例も参考にどうぞ：
+
 - [demo-complete.houjicha](./examples/demo-complete.houjicha) - 窃盗罪の完全な論証例
 - [demo-civil.houjicha](./examples/demo-civil.houjicha) - 民法（虚偽表示）の例
 
