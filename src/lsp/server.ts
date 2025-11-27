@@ -718,6 +718,16 @@ connection.onCompletion((params: TextDocumentPositionParams): CompletionItem[] =
           sortText: '05',
         },
         {
+          label: '∵',
+          kind: CompletionItemKind.Keyword,
+          detail: '思考過程メモ',
+          documentation: {
+            kind: MarkupKind.Markdown,
+            value: '## ∵思考過程メモ\n\n自分の思考過程をメモします。プレビューには表示されません。\n\n```\n∵ ここは自分の考えを整理するためのメモ\n```',
+          },
+          sortText: '05b',
+        },
+        {
           label: '+',
           kind: CompletionItemKind.Keyword,
           detail: '該当',
@@ -799,6 +809,7 @@ connection.onCompletion((params: TextDocumentPositionParams): CompletionItem[] =
 | \`+\` | 該当 | \`+*要件\` |
 | \`!\` | 否定 | \`!*要件\` |
 | \`;\` | 理由文 | \`; なぜなら...\` |
+| \`∵\` | 思考メモ | \`∵ 検討メモ\` |
 `,
       },
       sortText: '99',
@@ -1024,6 +1035,8 @@ connection.onHover((params: TextDocumentPositionParams): Hover | null => {
     '::': { title: '論述空間（Namespace）', description: '答案構成上の分類を示します。' },
     '+': { title: '該当', description: '要件に該当することを示します。' },
     '!': { title: '否定', description: '要件に該当しないことを示します。' },
+    '∵': { title: '思考過程メモ（ThinkingMemo）', description: '自分の思考過程をメモします。プレビューには表示されません。' },
+    ';': { title: '理由文（ReasonStatement）', description: '独立した理由文を記述します。' },
   };
 
   for (const [symbol, info] of Object.entries(hoverInfo)) {
