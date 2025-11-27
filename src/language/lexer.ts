@@ -20,6 +20,7 @@ export enum TokenType {
   TILDE_ARROW = 'TILDE_ARROW',       // ~> 理由（論点内）
   IMPLIES = 'IMPLIES',               // => 帰結
   SEMICOLON = 'SEMICOLON',           // ; 理由（独立行）
+  BECAUSE = 'BECAUSE',               // ∵ 思考過程メモ
 
   // 論理演算子
   AND = 'AND',                       // & または ＆
@@ -236,6 +237,10 @@ export class Lexer {
         this.addToken(TokenType.SEMICOLON, char, startPos);
         break;
 
+      case '∵':
+        this.addToken(TokenType.BECAUSE, char, startPos);
+        break;
+
       case '~':
         if (this.peek() === '>') {
           this.advance();
@@ -391,7 +396,7 @@ export class Lexer {
       '#', '＃', '^', ':', '：', '<', '>', '?', '？',
       '%', '％', '@', '＠', '~', '=', '&', '＆', '|', '｜',
       '+', '＋', '!', '！', '(', '（', ')', '）',
-      '$', '＄', '/', '\\', ';', '；',
+      '$', '＄', '/', '\\', ';', '；', '∵',
       '*', '＊',  // 要件マーカー
       ' ', '\t', '\u3000'
     ];

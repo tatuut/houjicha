@@ -5,7 +5,7 @@
 import {
   Document, Namespace, Claim, Requirement, Norm, Fact, Evaluation,
   Issue, Reason, Effect, Reference, Comment, ConstantDefinition,
-  ReasonStatement, Range, Position, ASTNode
+  ReasonStatement, ThinkingMemo, Range, Position, ASTNode
 } from './ast';
 import { Token, TokenType, tokenize, LexerError } from './lexer';
 
@@ -253,6 +253,25 @@ export class Parser {
     };
   }
 
+  // ===== 思考過程メモ（∵）解析 =====
+
+  private parseThinkingMemo(): ThinkingMemo {
+    const startPos = this.peek().range.start;
+    this.advance(); // ∵ を消費
+
+    let content = '';
+    while (!this.isAtEnd() && !this.check(TokenType.NEWLINE)) {
+      content += this.advance().value + ' ';
+    }
+
+    const endPos = this.peek().range.start;
+    return {
+      type: 'ThinkingMemo',
+      content: content.trim(),
+      range: this.createRange(startPos, endPos)
+    };
+  }
+
   // ===== 主張（Claim）解析 =====
 
   private parseClaim(): Claim {
@@ -294,6 +313,7 @@ export class Parser {
     // 要件がある場合（: で終わる）
     const requirements: Requirement[] = [];
     const reasonStatements: ReasonStatement[] = [];
+    const thinkingMemos: ThinkingMemo[] = [];
     let effect: Effect | undefined;
 
     const hasRequirements = this.match(TokenType.COLON);
@@ -326,6 +346,8 @@ export class Parser {
           effect = this.parseEffect();
         } else if (this.check(TokenType.SEMICOLON)) {
           reasonStatements.push(this.parseReasonStatement());
+        } else if (this.check(TokenType.BECAUSE)) {
+          thinkingMemos.push(this.parseThinkingMemo());
         } else if (this.check(TokenType.NEWLINE)) {
           this.advance();
         } else if (this.check(TokenType.COMMENT)) {
@@ -355,6 +377,7 @@ export class Parser {
       requirements,
       effect,
       reasonStatements: reasonStatements.length > 0 ? reasonStatements : undefined,
+      thinkingMemos: thinkingMemos.length > 0 ? thinkingMemos : undefined,
       range: this.createRange(startPos, endPos)
     };
   }
@@ -515,6 +538,7 @@ export class Parser {
     let fact: Fact | undefined;
     const subRequirements: Requirement[] = [];
     const reasonStatements: ReasonStatement[] = [];
+    const thinkingMemos: ThinkingMemo[] = [];
 
     // 行内複合構文: *要件: %規範 <= 事実 または *要件: $定数 <= 事実
     if (this.match(TokenType.COLON)) {
@@ -557,6 +581,8 @@ export class Parser {
           fact = this.parseFact();
         } else if (this.check(TokenType.SEMICOLON)) {
           reasonStatements.push(this.parseReasonStatement());
+        } else if (this.check(TokenType.BECAUSE)) {
+          thinkingMemos.push(this.parseThinkingMemo());
         } else if (this.check(TokenType.NEWLINE)) {
           this.advance();
         } else if (this.check(TokenType.COMMENT)) {
@@ -580,6 +606,7 @@ export class Parser {
       fact,
       subRequirements: subRequirements.length > 0 ? subRequirements : undefined,
       reasonStatements: reasonStatements.length > 0 ? reasonStatements : undefined,
+      thinkingMemos: thinkingMemos.length > 0 ? thinkingMemos : undefined,
       range: this.createRange(startPos, endPos)
     };
   }
@@ -594,6 +621,7 @@ export class Parser {
 
     const subRequirements: Requirement[] = [];
     const reasonStatements: ReasonStatement[] = [];
+    const thinkingMemos: ThinkingMemo[] = [];
 
     // 下位要件（インデント）- 規範ネスト対応
     if (this.check(TokenType.INDENT)) {
@@ -615,6 +643,8 @@ export class Parser {
           norm.fact = this.parseFact();
         } else if (this.check(TokenType.SEMICOLON)) {
           reasonStatements.push(this.parseReasonStatement());
+        } else if (this.check(TokenType.BECAUSE)) {
+          thinkingMemos.push(this.parseThinkingMemo());
         } else if (this.check(TokenType.NEWLINE)) {
           this.advance();
         } else if (this.check(TokenType.COMMENT)) {
@@ -638,6 +668,7 @@ export class Parser {
       fact: norm.fact,
       subRequirements: subRequirements.length > 0 ? subRequirements : undefined,
       reasonStatements: reasonStatements.length > 0 ? reasonStatements : undefined,
+      thinkingMemos: thinkingMemos.length > 0 ? thinkingMemos : undefined,
       range: this.createRange(startPos, endPos)
     };
   }

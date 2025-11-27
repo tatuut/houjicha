@@ -55,6 +55,7 @@ export interface Claim extends BaseNode {
   requirements: Requirement[];
   effect?: Effect;
   reasonStatements?: ReasonStatement[];
+  thinkingMemos?: ThinkingMemo[];
 }
 
 /** 根拠条文への参照（^刑法235条1項） */
@@ -91,6 +92,7 @@ export interface Requirement extends BaseNode {
   subRequirements?: Requirement[];
   issue?: Issue;
   reasonStatements?: ReasonStatement[];
+  thinkingMemos?: ThinkingMemo[];
 }
 
 /**
@@ -146,6 +148,12 @@ export interface ReasonStatement extends BaseNode {
   content: string;
 }
 
+/** 思考過程メモ（∵ メモ） */
+export interface ThinkingMemo extends BaseNode {
+  type: 'ThinkingMemo';
+  content: string;
+}
+
 /** 定数定義（as 第三者の規範） */
 export interface ConstantDefinition extends BaseNode {
   type: 'ConstantDefinition';
@@ -175,6 +183,7 @@ export type ASTNode =
   | Conclusion
   | Effect
   | ReasonStatement
+  | ThinkingMemo
   | ConstantDefinition
   | ConstantReference;
 

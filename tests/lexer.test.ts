@@ -47,11 +47,10 @@ describe('Lexer', () => {
     });
   });
 
-  describe('日本語括弧', () => {
-    it('「」を認識する', () => {
-      const { tokens } = tokenize('「要件」');
-      expect(tokens.find(t => t.type === TokenType.LBRACKET_JP)).toBeDefined();
-      expect(tokens.find(t => t.type === TokenType.RBRACKET_JP)).toBeDefined();
+  describe('思考過程メモ', () => {
+    it('∵ を認識する', () => {
+      const { tokens } = tokenize('∵ これはメモ');
+      expect(tokens.find(t => t.type === TokenType.BECAUSE)).toBeDefined();
     });
   });
 

@@ -46,7 +46,7 @@ describe('Parser', () => {
   describe('要件（Requirement）の解析', () => {
     it('基本的な要件を解析できる', () => {
       const { document } = parse(`#窃盗罪:
-    「他人の財物」`);
+    *他人の財物`);
       if (document.children[0].type === 'Claim') {
         expect(document.children[0].requirements).toHaveLength(1);
         expect(document.children[0].requirements[0].name).toBe('他人の財物');
@@ -55,7 +55,7 @@ describe('Parser', () => {
 
     it('規範付きの要件を解析できる', () => {
       const { document } = parse(`#窃盗罪:
-    「他人の財物」: %他人が所有する財物`);
+    *他人の財物: %他人が所有する財物`);
       if (document.children[0].type === 'Claim') {
         const req = document.children[0].requirements[0];
         expect(req.norm?.content).toContain('他人が所有する');
@@ -100,8 +100,8 @@ describe('Parser', () => {
   describe('効果（Effect）の解析', () => {
     it('効果を解析できる', () => {
       const { document } = parse(`#窃盗罪:
-    「要件」 <= 事実
->> 甲に窃盗罪が成立する`);
+    *要件 <= 事実
+    >> 甲に窃盗罪が成立する`);
       if (document.children[0].type === 'Claim') {
         expect(document.children[0].effect?.content).toBe('甲に窃盗罪が成立する');
       }
@@ -140,6 +140,29 @@ describe('Parser', () => {
     it('コメントを解析できる', () => {
       const { document } = parse('// これはコメント\n#主張');
       expect(document.children.some(c => c.type === 'Comment')).toBe(true);
+    });
+  });
+
+  describe('思考過程メモ（∵）の解析', () => {
+    it('Claim内の思考過程メモを解析できる', () => {
+      const { document } = parse(`#窃盗罪:
+    *他人の財物
+    ∵ これは思考過程のメモです`);
+      if (document.children[0].type === 'Claim') {
+        expect(document.children[0].thinkingMemos).toHaveLength(1);
+        expect(document.children[0].thinkingMemos![0].content).toBe('これは思考過程のメモです');
+      }
+    });
+
+    it('Requirement内の思考過程メモを解析できる', () => {
+      const { document } = parse(`#窃盗罪:
+    *他人の財物
+        ∵ 要件レベルのメモ`);
+      if (document.children[0].type === 'Claim') {
+        const req = document.children[0].requirements[0];
+        expect(req.thinkingMemos).toHaveLength(1);
+        expect(req.thinkingMemos![0].content).toBe('要件レベルのメモ');
+      }
     });
   });
 });
