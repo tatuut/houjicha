@@ -194,10 +194,41 @@ async function validateDocument(textDocument: TextDocument): Promise<void> {
     source: 'ほうじ茶',
   }));
 
+  // 全角スペースの警告
+  diagnostics.push(...detectFullWidthSpaces(text));
+
   // 意味的な検証（条文データベースを参照）
   diagnostics.push(...validateSemantics(result.document));
 
   connection.sendDiagnostics({ uri: textDocument.uri, diagnostics });
+}
+
+// 全角スペースを検出して警告
+function detectFullWidthSpaces(text: string): Diagnostic[] {
+  const diagnostics: Diagnostic[] = [];
+  const lines = text.split('\n');
+
+  for (let lineNum = 0; lineNum < lines.length; lineNum++) {
+    const line = lines[lineNum];
+    let col = 0;
+    for (let i = 0; i < line.length; i++) {
+      if (line[i] === '\u3000') {  // 全角スペース
+        diagnostics.push({
+          severity: DiagnosticSeverity.Warning,
+          range: {
+            start: { line: lineNum, character: col },
+            end: { line: lineNum, character: col + 1 },
+          },
+          message: '全角スペースが使用されています。半角スペースに置き換えてください。',
+          source: 'ほうじ茶',
+          data: { type: 'fullWidthSpace' },
+        });
+      }
+      col++;
+    }
+  }
+
+  return diagnostics;
 }
 
 // 意味的な検証
@@ -1254,7 +1285,25 @@ connection.onCodeAction((params: CodeActionParams): CodeAction[] => {
       }
     }
 
-    // 4. 孤立した要件・規範・論点への対応（主張で囲む提案）
+    // 4. 全角スペースを半角に置換
+    if (diagnostic.data?.type === 'fullWidthSpace') {
+      actions.push({
+        title: '全角スペースを半角に置換',
+        kind: CodeActionKind.QuickFix,
+        diagnostics: [diagnostic],
+        isPreferred: true,
+        edit: {
+          changes: {
+            [params.textDocument.uri]: [{
+              range: diagnostic.range,
+              newText: ' ',  // 半角スペース
+            }],
+          },
+        },
+      });
+    }
+
+    // 6. 孤立した要件・規範・論点への対応（主張で囲む提案）
     if (diagnostic.message.includes('主張（#）の内部に記述してください') ||
         diagnostic.message.includes('主張（#）の後に記述してください') ||
         diagnostic.message.includes('主張（#）または名前空間（::）の内部に記述してください')) {
@@ -1277,7 +1326,7 @@ connection.onCodeAction((params: CodeActionParams): CodeAction[] => {
       });
     }
 
-    // 5. 論点推奨への対応
+    // 7. 論点推奨への対応
     if (diagnostic.message.includes('論点') && diagnostic.message.includes('推奨')) {
       const issueMatch = diagnostic.message.match(/「([^」]+)」/);
       if (issueMatch) {

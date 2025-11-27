@@ -237,7 +237,8 @@ export class Lexer {
         this.addToken(TokenType.SEMICOLON, char, startPos);
         break;
 
-      case '∵':
+      case '∵':  // U+2235 BECAUSE
+      case '∴':  // U+2234 THEREFORE（間違いやすい）- BECAUSEとして扱う
         this.addToken(TokenType.BECAUSE, char, startPos);
         break;
 
@@ -396,7 +397,7 @@ export class Lexer {
       '#', '＃', '^', ':', '：', '<', '>', '?', '？',
       '%', '％', '@', '＠', '~', '=', '&', '＆', '|', '｜',
       '+', '＋', '!', '！', '(', '（', ')', '）',
-      '$', '＄', '/', '\\', ';', '；', '∵',
+      '$', '＄', '/', '\\', ';', '；', '∵', '∴',  // ∴も∵として認識
       '*', '＊',  // 要件マーカー
       ' ', '\t', '\u3000'
     ];
