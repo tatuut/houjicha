@@ -4,6 +4,25 @@
 
 ![エディタとプレビュー](docs/images/editor.png)
 
+## プロジェクト背景
+
+本プロジェクトは、**matcha**という非OSSプロジェクトに触発されて開発されました。matchaの設計思想を参考にしつつ、オープンソースとして法的推論の構造化を実現することを目指しています。
+
+### 設計思想
+
+プログラミングにおいてコンパイルエラーが「これじゃ動かない」と教えてくれるように、ほうじ茶は「この法的推論は構造的に成立しない」と教えてくれます。
+
+- **形式的チェック**（要件の欠落など）→ プログラム（ほうじ茶）の仕事
+- **実質的判断**（論理矛盾、事実認定など）→ AI/法律家の仕事
+
+### 将来構想
+
+- **MCPツール**: AIが法的推論を行う際の入力補助ツールとして機能
+- **AIエコシステム**: 弁護士の監督下でAIが法的文書を作成・チェック
+- **法的三段論法の担保**: 構造的な品質チェックにより論証の質を保証
+
+詳細は [設計ドキュメント](docs/DESIGN.md) を参照してください。
+
 ## 概要
 
 ほうじ茶は、法律の条文解釈・要件検討・あてはめを形式的に記述できる言語です。法学の学習や答案作成の補助ツールとして使用できます。
@@ -169,6 +188,53 @@ code --install-extension houjicha-lsp-0.1.0.vsix
 
 - `.houjicha` - 標準拡張子
 - `.hcha` - 短縮形
+
+## MCPツール（AI連携）
+
+ほうじ茶はMCP（Model Context Protocol）サーバーを提供し、AIが法的推論を行う際の入力補助ツールとして機能します。
+
+### セットアップ
+
+```bash
+# ビルド
+npm run build
+
+# MCPサーバーを起動（通常はAIクライアントが自動起動）
+npm run mcp
+```
+
+### Claude Desktopでの設定
+
+`claude_desktop_config.json` に以下を追加：
+
+```json
+{
+  "mcpServers": {
+    "houjicha": {
+      "command": "node",
+      "args": ["/path/to/houjicha/dist/mcp/server.js"]
+    }
+  }
+}
+```
+
+### 利用可能なツール
+
+| ツール | 機能 |
+|--------|------|
+| `houjicha_validate` | コードを検証してエラー/警告/ヒントを返す |
+| `houjicha_get_completions` | 補完候補を取得 |
+| `houjicha_apply_completion` | 補完を適用 |
+| `houjicha_list_templates` | 条文テンプレート一覧 |
+| `houjicha_get_template` | テンプレート詳細取得 |
+| `houjicha_search_templates` | テンプレート検索 |
+| `houjicha_expand_template` | テンプレート展開 |
+| `houjicha_register_template` | テンプレート登録 |
+| `houjicha_add_to_template` | テンプレートに追加 |
+| `houjicha_list_snippets` | スニペット一覧 |
+| `houjicha_register_snippet` | スニペット登録 |
+
+詳細は [設計ドキュメント](docs/DESIGN.md) を参照してください。
 
 ## 開発
 

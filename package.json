@@ -89,9 +89,11 @@
     "lint": "eslint src --ext ts",
     "test": "jest",
     "vscode:prepublish": "npm run build",
-    "package": "vsce package"
+    "package": "vsce package",
+    "mcp": "node dist/mcp/server.js"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.23.0",
     "js-yaml": "^4.1.1",
     "vscode-languageclient": "^9.0.1",
     "vscode-languageserver": "^9.0.1",
