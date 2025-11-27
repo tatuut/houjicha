@@ -493,7 +493,7 @@ connection.onCompletion((params: TextDocumentPositionParams): CompletionItem[] =
               }
             }
 
-            // * 構文：閉じ括弧不要
+            // 段階的補完: 要件名だけを挿入（規範やあてはめは後で）
             const norm = annotation.解釈?.[0]?.規範;
             items.push({
               label: (isWritten ? '✓ ' : '') + reqName,
@@ -505,9 +505,8 @@ connection.onCompletion((params: TextDocumentPositionParams): CompletionItem[] =
               },
               sortText: `${isWritten ? '1' : '0'}-${String(sortOrder).padStart(2, '0')}`,
               filterText: '*' + reqName,
-              insertText: norm
-                ? `${reqName}: %${norm} <= `
-                : `${reqName} <= `,
+              // 要件名だけ挿入（次のステップで : や % を入力）
+              insertText: reqName,
               insertTextFormat: InsertTextFormat.PlainText,
             });
           }
@@ -586,8 +585,9 @@ connection.onCompletion((params: TextDocumentPositionParams): CompletionItem[] =
             if (interp.説明) docContent += `  - ${interp.説明}\n`;
           }
 
+          // 段階的補完: 論点名だけを挿入（~> 理由 => %規範 は後で）
           items.push({
-            label: (isWritten ? '✓ ' : '⚠️ ') + ` ${issue.問題} ~> ${issue.理由 || '【理由】'} => %${norm}`,
+            label: (isWritten ? '✓ ' : '⚠️ ') + issue.問題,
             kind: CompletionItemKind.Snippet,
             detail: isWritten ? `✓ 検討済み` : `⚠️ 未検討`,
             documentation: {
@@ -596,7 +596,8 @@ connection.onCompletion((params: TextDocumentPositionParams): CompletionItem[] =
             },
             // 未検討を上位に
             sortText: `${isWritten ? '1' : '0'}-${String(sortOrder).padStart(2, '0')}`,
-            insertText: ` ${issue.問題} ~> ${issue.理由 || '【理由】'} => %${norm}`,
+            // 論点名だけ挿入（次のステップで ~> を入力）
+            insertText: ` ${issue.問題}`,
             insertTextFormat: InsertTextFormat.PlainText,
           });
         }
@@ -615,14 +616,30 @@ connection.onCompletion((params: TextDocumentPositionParams): CompletionItem[] =
   }
 
   // /gen: テンプレート生成
-  if (lineText.match(/\/gen\s*$/)) {
+  if (lineText.match(/\/gen/) || lineText.trimStart().startsWith('/')) {
+    // /gen の開始位置を特定
+    const genMatch = lineText.match(/\/gen\S*/);
+    const genStart = genMatch ? lineText.indexOf(genMatch[0]) : lineText.lastIndexOf('/');
+    const genEnd = genMatch ? genStart + genMatch[0].length : lineText.length;
+
     for (const [id, article] of articleDatabase.articles) {
       items.push({
         label: `生成: ${article.名称 || id}`,
         kind: CompletionItemKind.Snippet,
-        insertText: generateTemplate(article),
         detail: 'テンプレートを生成',
-        documentation: article.原文.substring(0, 100),
+        documentation: {
+          kind: MarkupKind.Markdown,
+          value: `**${article.名称 || id}**\n\n${article.原文.substring(0, 150)}...`,
+        },
+        // /gen を置換してテンプレートを挿入
+        textEdit: {
+          range: {
+            start: { line: params.position.line, character: genStart },
+            end: { line: params.position.line, character: genEnd },
+          },
+          newText: generateTemplate(article),
+        },
+        filterText: '/gen ' + (article.名称 || id),
       });
     }
   }
@@ -641,17 +658,151 @@ connection.onCompletion((params: TextDocumentPositionParams): CompletionItem[] =
     }
   }
 
-  // 行頭での補完
-  if (lineText.trim() === '') {
-    items.push(
-      { label: '#', kind: CompletionItemKind.Keyword, detail: '主張' },
-      { label: '::', kind: CompletionItemKind.Keyword, detail: '論述空間' },
-      { label: '「', kind: CompletionItemKind.Keyword, detail: '要件' },
-      { label: '%', kind: CompletionItemKind.Keyword, detail: '規範' },
-      { label: '?', kind: CompletionItemKind.Keyword, detail: '論点' },
-      { label: '>>', kind: CompletionItemKind.Keyword, detail: '効果' },
-      { label: '/gen', kind: CompletionItemKind.Keyword, detail: 'テンプレート生成' },
-    );
+  // 記号ガイド補完（何も入力していない状態）
+  const trimmedLine = lineText.trim();
+  const isInsideClaim = findCurrentClaim(text, offset) !== null;
+  const isIndented = lineText.length > 0 && lineText.length !== trimmedLine.length;
+
+  if (trimmedLine === '' && items.length === 0) {
+    if (isIndented && isInsideClaim) {
+      // 主張内（インデント）：使える記号を表示
+      items.push(
+        {
+          label: '*',
+          kind: CompletionItemKind.Keyword,
+          detail: '要件',
+          documentation: {
+            kind: MarkupKind.Markdown,
+            value: '## *要件*\n\n条文の構成要件を記述します。\n\n```\n*他人の財物: %規範 <= あてはめ\n```',
+          },
+          sortText: '01',
+        },
+        {
+          label: '%',
+          kind: CompletionItemKind.Keyword,
+          detail: '規範',
+          documentation: {
+            kind: MarkupKind.Markdown,
+            value: '## %規範\n\n法的規範・解釈を記述します。\n\n```\n%占有者の意思に反して占有を移転\n```',
+          },
+          sortText: '02',
+        },
+        {
+          label: '?',
+          kind: CompletionItemKind.Keyword,
+          detail: '論点',
+          documentation: {
+            kind: MarkupKind.Markdown,
+            value: '## ?論点\n\n法的論点を提起します。\n\n```\n? 財物の意義 ~> 理由 => %規範\n```',
+          },
+          sortText: '03',
+        },
+        {
+          label: '$',
+          kind: CompletionItemKind.Keyword,
+          detail: '定数参照',
+          documentation: {
+            kind: MarkupKind.Markdown,
+            value: '## $定数\n\n定義済みの規範を参照します。\n\n```\n$不法領得 <= あてはめ\n```',
+          },
+          sortText: '04',
+        },
+        {
+          label: ';',
+          kind: CompletionItemKind.Keyword,
+          detail: '理由',
+          documentation: {
+            kind: MarkupKind.Markdown,
+            value: '## ;理由\n\n独立した理由文を記述します。\n\n```\n; なぜなら〜だからである\n```',
+          },
+          sortText: '05',
+        },
+        {
+          label: '+',
+          kind: CompletionItemKind.Keyword,
+          detail: '該当',
+          documentation: {
+            kind: MarkupKind.Markdown,
+            value: '## +該当\n\n要件に該当することを明示します。\n\n```\n+*他人の財物 <= 充足\n```',
+          },
+          sortText: '06',
+        },
+        {
+          label: '!',
+          kind: CompletionItemKind.Keyword,
+          detail: '否定',
+          documentation: {
+            kind: MarkupKind.Markdown,
+            value: '## !否定\n\n要件に該当しないことを明示します。\n\n```\n!*不法領得の意思 <= 欠如\n```',
+          },
+          sortText: '07',
+        },
+      );
+    } else {
+      // トップレベル：主張や論述空間
+      items.push(
+        {
+          label: '#',
+          kind: CompletionItemKind.Keyword,
+          detail: '主張',
+          documentation: {
+            kind: MarkupKind.Markdown,
+            value: '## #主張\n\n法的主張を開始します。\n\n```\n#窃盗罪^刑法235条 <= 甲の行為:\n```',
+          },
+          sortText: '01',
+        },
+        {
+          label: '::',
+          kind: CompletionItemKind.Keyword,
+          detail: '論述空間',
+          documentation: {
+            kind: MarkupKind.Markdown,
+            value: '## ::論述空間\n\n答案の区切りを作ります。\n\n```\n::甲の罪責\n::乙の罪責\n```',
+          },
+          sortText: '02',
+        },
+        {
+          label: '/gen',
+          kind: CompletionItemKind.Keyword,
+          detail: 'テンプレート生成',
+          documentation: {
+            kind: MarkupKind.Markdown,
+            value: '## /gen\n\n条文からテンプレートを自動生成します。',
+          },
+          sortText: '03',
+        },
+      );
+    }
+
+    // 記号早見表を追加
+    items.push({
+      label: '📖 記号早見表',
+      kind: CompletionItemKind.Text,
+      detail: '記号の一覧と使い方',
+      documentation: {
+        kind: MarkupKind.Markdown,
+        value: `## 記号早見表
+
+| 記号 | 意味 | 使用例 |
+|------|------|--------|
+| \`#\` | 主張 | \`#窃盗罪^刑法235条\` |
+| \`*\` | 要件 | \`*他人の財物\` |
+| \`%\` | 規範 | \`%占有者の意思に反して\` |
+| \`?\` | 論点 | \`? 財物の意義\` |
+| \`>>\` | 効果 | \`>> 甲に窃盗罪が成立\` |
+| \`<=\` | あてはめ | \`<= 本件時計は...\` |
+| \`~>\` | 理由 | \`~> なぜなら...\` |
+| \`::\` | 論述空間 | \`::甲の罪責\` |
+| \`^\` | 条文参照 | \`^刑法235条\` |
+| \`$\` | 定数参照 | \`$不法領得\` |
+| \`@\` | 評価 | \`@悪質\` |
+| \`+\` | 該当 | \`+*要件\` |
+| \`!\` | 否定 | \`!*要件\` |
+| \`;\` | 理由文 | \`; なぜなら...\` |
+`,
+      },
+      sortText: '99',
+    });
   }
 
   return items;
@@ -697,67 +848,6 @@ connection.onHover((params: TextDocumentPositionParams): Hover | null => {
     const reqIndex = line.indexOf(asteriskReqMatch[0]);
     // カーソルが要件名の上にあるか確認
     if (position.character >= reqIndex && position.character <= reqIndex + asteriskReqMatch[0].length) {
-      const article = currentClaim ? findArticle(articleDatabase, currentClaim) : null;
-      if (article) {
-        const annotation = article.アノテーション.find(
-          a => a.範囲 === reqName || a.name === reqName
-        );
-        if (annotation) {
-          // 上位文脈を表示
-          let content = currentClaim
-            ? `## ${currentClaim} > *${reqName}*\n\n`
-            : `## *${reqName}*\n\n`;
-
-          // 規範
-          if (annotation.解釈 && annotation.解釈.length > 0) {
-            content += `### 規範\n`;
-            for (const interp of annotation.解釈) {
-              content += `- **${interp.規範}**`;
-              if (interp.出典) content += ` _(${interp.出典})_`;
-              content += '\n';
-              if (interp.説明) content += `  > ${interp.説明}\n`;
-            }
-            content += '\n';
-          }
-
-          // 下位要件
-          if (annotation.下位要件 && annotation.下位要件.length > 0) {
-            content += `### 下位要件\n`;
-            for (const sub of annotation.下位要件) {
-              content += `- **${sub.name}**`;
-              if (sub.規範) content += `: ${sub.規範}`;
-              content += '\n';
-            }
-            content += '\n';
-          }
-
-          // 論点
-          if (annotation.論点 && annotation.論点.length > 0) {
-            content += `### 関連論点\n`;
-            for (const issue of annotation.論点) {
-              content += `#### ${issue.問題}\n`;
-              if (issue.理由) content += `_${issue.理由}_\n\n`;
-              for (const interp of issue.解釈) {
-                content += `- ${interp.規範}`;
-                if (interp.出典) content += ` _(${interp.出典})_`;
-                content += '\n';
-              }
-            }
-          }
-
-          return { contents: { kind: MarkupKind.Markdown, value: content } };
-        }
-      }
-    }
-  }
-
-  // 要件「」のホバー（後方互換）
-  const reqMatch = line.match(/「([^」]+)」/);
-  if (reqMatch) {
-    const reqName = reqMatch[1];
-    const reqIndex = line.indexOf(reqMatch[0]);
-    // カーソルが要件名の上にあるか確認
-    if (position.character >= reqIndex && position.character <= reqIndex + reqMatch[0].length) {
       const article = currentClaim ? findArticle(articleDatabase, currentClaim) : null;
       if (article) {
         const annotation = article.アノテーション.find(
@@ -925,7 +1015,7 @@ connection.onHover((params: TextDocumentPositionParams): Hover | null => {
   const hoverInfo: { [key: string]: { title: string; description: string } } = {
     '#': { title: '主張（Claim）', description: '法的主張を示します。' },
     '%': { title: '規範（Norm）', description: '法的規範・解釈を示します。' },
-    '「': { title: '要件（Requirement）', description: '条文の構成要件を示します。' },
+    '*': { title: '要件（Requirement）', description: '条文の構成要件を示します。' },
     '?': { title: '論点（Issue）', description: '法的論点を提起します。' },
     '>>': { title: '効果（Effect）', description: '法的効果・結論を示します。' },
     '<=': { title: 'あてはめ（Application）', description: '事実を法的概念にあてはめます。' },
@@ -1033,17 +1123,17 @@ connection.onCodeAction((params: CodeActionParams): CodeAction[] => {
             break;
           }
           // インデントされた要件行があれば更新
-          if (l.match(/^\s+「/) || l.match(/^\s+%/) || l.match(/^\s+;/) || l.match(/^\s+\?/)) {
+          if (l.match(/^\s+\*/) || l.match(/^\s+%/) || l.match(/^\s+;/) || l.match(/^\s+\?/)) {
             insertLine = i + 1;
           }
         }
 
         const insertText = norm
-          ? `    「${reqName}」: %${norm} <= 【あてはめ】\n`
-          : `    「${reqName}」 <= 【あてはめ】\n`;
+          ? `    *${reqName}: %${norm} <= 【あてはめ】\n`
+          : `    *${reqName} <= 【あてはめ】\n`;
 
         actions.push({
-          title: `「${reqName}」を追加`,
+          title: `*${reqName}を追加`,
           kind: CodeActionKind.QuickFix,
           diagnostics: [diagnostic],
           isPreferred: true,
@@ -1062,33 +1152,7 @@ connection.onCodeAction((params: CodeActionParams): CodeAction[] => {
       }
     }
 
-    // 2. 閉じ括弧がない場合のクイックフィックス
-    if (diagnostic.message.includes('閉じ括弧') || diagnostic.message.includes('」が見つかりません')) {
-      // 開き括弧「の位置を探す
-      const openBracketIndex = lineText.indexOf('「');
-      if (openBracketIndex !== -1) {
-        // 行末に」を追加
-        actions.push({
-          title: '閉じ括弧「」」を追加',
-          kind: CodeActionKind.QuickFix,
-          diagnostics: [diagnostic],
-          isPreferred: true,
-          edit: {
-            changes: {
-              [params.textDocument.uri]: [{
-                range: {
-                  start: { line: diagLine, character: lineText.length },
-                  end: { line: diagLine, character: lineText.length },
-                },
-                newText: '」',
-              }],
-            },
-          },
-        });
-      }
-    }
-
-    // 3. 要件なし主張へのテンプレート追加
+    // 2. 要件なし主張へのテンプレート追加
     if (diagnostic.message.includes('要件または事実のあてはめがありません')) {
       // 主張を解析して条文を特定
       const claimMatch = lineText.match(/#([^\^<=:\s]+)/);
@@ -1107,15 +1171,15 @@ connection.onCodeAction((params: CodeActionParams): CodeAction[] => {
           insertText = requirements.map(req => {
             const norm = req.解釈?.[0]?.規範;
             return norm
-              ? `    「${req.範囲}」: %${norm} <= 【あてはめ】`
-              : `    「${req.範囲}」 <= 【あてはめ】`;
+              ? `    *${req.範囲}: %${norm} <= 【あてはめ】`
+              : `    *${req.範囲} <= 【あてはめ】`;
           }).join('\n') + '\n';
         }
       }
 
       // フォールバック：基本テンプレート
       if (!insertText) {
-        insertText = '    「要件1」 <= 【事実をあてはめる】\n    「要件2」 <= 【事実をあてはめる】\n';
+        insertText = '    *要件1 <= 【事実をあてはめる】\n    *要件2 <= 【事実をあてはめる】\n';
       }
 
       // 行末が : で終わっていない場合は : を追加
@@ -1154,7 +1218,7 @@ connection.onCodeAction((params: CodeActionParams): CodeAction[] => {
       });
     }
 
-    // 4. 構文エラー「予期しないトークン」への対応
+    // 3. 構文エラー「予期しないトークン」への対応
     if (diagnostic.message.includes('予期しないトークン')) {
       // 条文なしの主張 #主張^ の場合
       if (lineText.match(/#[^\^]+\^[\s]*$/)) {
@@ -1177,7 +1241,7 @@ connection.onCodeAction((params: CodeActionParams): CodeAction[] => {
       }
     }
 
-    // 5. 孤立した要件・規範・論点への対応（主張で囲む提案）
+    // 4. 孤立した要件・規範・論点への対応（主張で囲む提案）
     if (diagnostic.message.includes('主張（#）の内部に記述してください') ||
         diagnostic.message.includes('主張（#）の後に記述してください') ||
         diagnostic.message.includes('主張（#）または名前空間（::）の内部に記述してください')) {
@@ -1200,7 +1264,7 @@ connection.onCodeAction((params: CodeActionParams): CodeAction[] => {
       });
     }
 
-    // 6. 論点推奨への対応
+    // 5. 論点推奨への対応
     if (diagnostic.message.includes('論点') && diagnostic.message.includes('推奨')) {
       const issueMatch = diagnostic.message.match(/「([^」]+)」/);
       if (issueMatch) {
@@ -1231,13 +1295,13 @@ connection.onCodeAction((params: CodeActionParams): CodeAction[] => {
             insertLine = i;
             break;
           }
-          if (l.match(/^\s+「/) || l.match(/^\s+%/) || l.match(/^\s+\?/) || l.match(/^\s+;/)) {
+          if (l.match(/^\s+\*/) || l.match(/^\s+%/) || l.match(/^\s+\?/) || l.match(/^\s+;/)) {
             insertLine = i + 1;
           }
         }
 
         actions.push({
-          title: `論点「${issueName}」を追加`,
+          title: `論点: ${issueName} を追加`,
           kind: CodeActionKind.QuickFix,
           diagnostics: [diagnostic],
           edit: {
@@ -1283,7 +1347,7 @@ connection.onCodeAction((params: CodeActionParams): CodeAction[] => {
           break;
         }
         // インデントされた要件行があれば更新
-        if (l.match(/^\s+「/) || l.match(/^\s+%/) || l.match(/^\s+\?/) || l.match(/^\s+;/)) {
+        if (l.match(/^\s+\*/) || l.match(/^\s+%/) || l.match(/^\s+\?/) || l.match(/^\s+;/)) {
           insertLine = i + 1;
         }
       }
@@ -1309,7 +1373,7 @@ connection.onCodeAction((params: CodeActionParams): CodeAction[] => {
   return actions;
 });
 
-// ドキュメントシンボル
+// ドキュメントシンボル（案B+C: 条文構造+論証フロー）
 connection.onDocumentSymbol((params): DocumentSymbol[] => {
   const cached = documentCache.get(params.textDocument.uri);
   if (!cached) return [];
@@ -1320,11 +1384,13 @@ connection.onDocumentSymbol((params): DocumentSymbol[] => {
     name: string,
     kind: SymbolKind,
     range: { start: { line: number; column: number }; end: { line: number; column: number } },
-    children?: DocumentSymbol[]
+    children?: DocumentSymbol[],
+    detail?: string
   ): DocumentSymbol {
     return {
       name,
       kind,
+      detail,
       range: {
         start: { line: range.start.line, character: range.start.column },
         end: { line: range.end.line, character: range.end.column },
@@ -1337,31 +1403,149 @@ connection.onDocumentSymbol((params): DocumentSymbol[] => {
     };
   }
 
-  function processRequirements(requirements: Requirement[]): DocumentSymbol[] {
-    if (!requirements) return [];
-    return requirements
-      .filter(req => req && req.name && req.range)  // 不完全なデータをフィルタ
-      .map(req => {
-        const children: DocumentSymbol[] = [];
-        if (req.subRequirements) {
-          children.push(...processRequirements(req.subRequirements));
-        }
-        return createSymbol(req.name || '(名前なし)', SymbolKind.Property, req.range, children.length > 0 ? children : undefined);
-      });
+  // 要件の充足状況を判定
+  function getRequirementStatus(req: Requirement): string {
+    if (req.concluded === 'positive') return '✅';
+    if (req.concluded === 'negative') return '❌';
+    if (req.issue) return '⚠️';  // 論点あり
+    if (req.fact) return '○';    // あてはめあり（未確定）
+    return '・';                  // 未検討
   }
 
+  // 要件をシンボルに変換
+  function processRequirement(req: Requirement): DocumentSymbol | null {
+    if (!req || !req.name || !req.range) return null;
+
+    const status = getRequirementStatus(req);
+    const children: DocumentSymbol[] = [];
+
+    // 規範があれば表示
+    if (req.norm && req.norm.content) {
+      children.push(createSymbol(
+        `%${req.norm.content.substring(0, 30)}${req.norm.content.length > 30 ? '...' : ''}`,
+        SymbolKind.Function,
+        req.norm.range || req.range,
+        undefined,
+        '規範'
+      ));
+    }
+
+    // あてはめがあれば表示
+    if (req.fact && req.fact.content) {
+      children.push(createSymbol(
+        `<= ${req.fact.content.substring(0, 30)}${req.fact.content.length > 30 ? '...' : ''}`,
+        SymbolKind.String,
+        req.fact.range || req.range,
+        undefined,
+        'あてはめ'
+      ));
+    }
+
+    // 論点があれば表示
+    if (req.issue && req.issue.question) {
+      children.push(createSymbol(
+        `? ${req.issue.question}`,
+        SymbolKind.Interface,
+        req.issue.range || req.range,
+        undefined,
+        '論点'
+      ));
+    }
+
+    // 下位要件
+    if (req.subRequirements && req.subRequirements.length > 0) {
+      for (const sub of req.subRequirements) {
+        const subSymbol = processRequirement(sub);
+        if (subSymbol) children.push(subSymbol);
+      }
+    }
+
+    return createSymbol(
+      `${status} *${req.name}`,
+      SymbolKind.Property,
+      req.range,
+      children.length > 0 ? children : undefined,
+      req.concluded === 'positive' ? '充足' : req.concluded === 'negative' ? '不充足' : undefined
+    );
+  }
+
+  // 主張をシンボルに変換（論証フロー形式）
   function processClaim(claim: Claim): DocumentSymbol | null {
     if (!claim || !claim.range) return null;
-    const prefix = claim.concluded === 'positive' ? '+' : claim.concluded === 'negative' ? '!' : '';
-    const children = processRequirements(claim.requirements || []);
-    if (claim.effect && claim.effect.content && claim.effect.range) {
-      children.push(createSymbol(claim.effect.content, SymbolKind.Event, claim.effect.range));
+
+    const children: DocumentSymbol[] = [];
+
+    // 条文情報を取得
+    const articleRef = claim.reference?.citation || '';
+    const claimTitle = articleRef
+      ? `#${claim.name}（${articleRef}）`
+      : `#${claim.name || '(名前なし)'}`;
+
+    // 充足状況のサマリーを計算
+    let fulfilled = 0;
+    let unfulfilled = 0;
+    let pending = 0;
+    let hasIssue = false;
+
+    for (const req of claim.requirements || []) {
+      if (req.concluded === 'positive') fulfilled++;
+      else if (req.concluded === 'negative') unfulfilled++;
+      else pending++;
+      if (req.issue) hasIssue = true;
     }
-    return createSymbol(`${prefix}#${claim.name || '(名前なし)'}`, SymbolKind.Class, claim.range, children.length > 0 ? children : undefined);
+
+    const total = (claim.requirements || []).length;
+    const summary = total > 0 ? `${fulfilled}/${total}充足` : '';
+
+    // 【構成要件】グループ
+    if (claim.requirements && claim.requirements.length > 0) {
+      const reqSymbols: DocumentSymbol[] = [];
+      for (const req of claim.requirements) {
+        const reqSymbol = processRequirement(req);
+        if (reqSymbol) reqSymbols.push(reqSymbol);
+      }
+
+      if (reqSymbols.length > 0) {
+        // 構成要件グループのrangeは最初の要件から最後の要件まで
+        const groupRange = {
+          start: claim.requirements[0].range.start,
+          end: claim.requirements[claim.requirements.length - 1].range.end
+        };
+        children.push(createSymbol(
+          `【構成要件】${hasIssue ? '⚠️' : ''} ${summary}`,
+          SymbolKind.Struct,
+          groupRange,
+          reqSymbols
+        ));
+      }
+    }
+
+    // 【結論】グループ
+    if (claim.effect && claim.effect.content && claim.effect.range) {
+      const conclusionStatus = claim.concluded === 'positive' ? '✅' :
+                               claim.concluded === 'negative' ? '❌' :
+                               unfulfilled > 0 ? '❌' :
+                               fulfilled === total && total > 0 ? '✅' : '？';
+      children.push(createSymbol(
+        `【結論】${conclusionStatus} >> ${claim.effect.content}`,
+        SymbolKind.Event,
+        claim.effect.range
+      ));
+    }
+
+    return createSymbol(
+      claimTitle,
+      SymbolKind.Class,
+      claim.range,
+      children.length > 0 ? children : undefined,
+      summary
+    );
   }
 
+  // ドキュメントの子要素を処理
   for (const child of cached.document.children) {
     if (!child || !child.range) continue;
+
     if (child.type === 'Namespace') {
       const nsChildren: DocumentSymbol[] = [];
       for (const nsChild of child.children) {
@@ -1370,7 +1554,12 @@ connection.onDocumentSymbol((params): DocumentSymbol[] => {
           if (symbol) nsChildren.push(symbol);
         }
       }
-      symbols.push(createSymbol(`::${child.name || '(名前なし)'}`, SymbolKind.Namespace, child.range, nsChildren.length > 0 ? nsChildren : undefined));
+      symbols.push(createSymbol(
+        `::${child.name || '(名前なし)'}`,
+        SymbolKind.Namespace,
+        child.range,
+        nsChildren.length > 0 ? nsChildren : undefined
+      ));
     } else if (child.type === 'Claim') {
       const symbol = processClaim(child);
       if (symbol) symbols.push(symbol);
@@ -1438,7 +1627,7 @@ connection.languages.semanticTokens.on((params): SemanticTokens => {
     if ((match = /\^([^<=:\s]+)/.exec(line))) {
       builder.push(lineIndex, match.index, match[0].length, tokenTypes.indexOf('type'), 0);
     }
-    if ((match = /「([^」]+)」/.exec(line))) {
+    if ((match = /\*([^\s:<=]+)/.exec(line))) {
       builder.push(lineIndex, match.index, match[0].length, tokenTypes.indexOf('string'), 0);
     }
     if ((match = /([+!]?)%([^<=:\s@]+)/.exec(line))) {

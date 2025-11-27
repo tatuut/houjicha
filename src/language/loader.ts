@@ -157,7 +157,7 @@ export function generateTemplate(
   for (const annotation of article.アノテーション) {
     if (annotation.種別 === '要件' && annotation.範囲) {
       // 要件行
-      let reqLine = `${indent}「${annotation.範囲}」`;
+      let reqLine = `${indent}*${annotation.範囲}`;
 
       // 規範を追加
       if (includeNorms && annotation.解釈 && annotation.解釈.length > 0) {

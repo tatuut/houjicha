@@ -1,6 +1,6 @@
 /**
  * ほうじ茶（Houjicha）- VS Code 拡張機能
- * Language Server クライアント + インライン補完
+ * Language Server クライアント + インライン補完 + プレビュー
  */
 
 import * as path from 'path';
@@ -12,8 +12,159 @@ import {
   ServerOptions,
   TransportKind,
 } from 'vscode-languageclient/node';
+import { parse } from '../language/parser';
+import { renderToHtml, getPreviewHtml, RenderFormat } from '../language/renderer';
 
 let client: LanguageClient;
+let previewPanel: vscode.WebviewPanel | undefined;
+
+// TreeViewのアイテム
+class HoujichaTreeItem extends vscode.TreeItem {
+  constructor(
+    public readonly label: string,
+    public readonly collapsibleState: vscode.TreeItemCollapsibleState,
+    public readonly filePath?: string,
+    public readonly line?: number,
+    public readonly itemType?: 'file' | 'namespace' | 'claim' | 'requirement' | 'effect',
+    public readonly status?: string
+  ) {
+    super(label, collapsibleState);
+
+    // アイコンとコンテキスト設定
+    if (itemType === 'file') {
+      this.iconPath = new vscode.ThemeIcon('file');
+      this.contextValue = 'houjichaFile';
+    } else if (itemType === 'namespace') {
+      this.iconPath = new vscode.ThemeIcon('folder');
+    } else if (itemType === 'claim') {
+      this.iconPath = new vscode.ThemeIcon('law');
+    } else if (itemType === 'requirement') {
+      const icon = status === '✅' ? 'pass' :
+                   status === '❌' ? 'error' :
+                   status === '⚠️' ? 'warning' : 'circle-outline';
+      this.iconPath = new vscode.ThemeIcon(icon);
+    } else if (itemType === 'effect') {
+      this.iconPath = new vscode.ThemeIcon('arrow-right');
+    }
+
+    // クリックでファイルを開く
+    if (filePath && line !== undefined) {
+      this.command = {
+        command: 'houjicha.openLocation',
+        title: 'Open',
+        arguments: [filePath, line],
+      };
+    }
+  }
+}
+
+// TreeDataProvider
+class HoujichaTreeProvider implements vscode.TreeDataProvider<HoujichaTreeItem> {
+  private _onDidChangeTreeData = new vscode.EventEmitter<HoujichaTreeItem | undefined>();
+  readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
+
+  refresh(): void {
+    this._onDidChangeTreeData.fire(undefined);
+  }
+
+  getTreeItem(element: HoujichaTreeItem): vscode.TreeItem {
+    return element;
+  }
+
+  async getChildren(element?: HoujichaTreeItem): Promise<HoujichaTreeItem[]> {
+    if (!element) {
+      // ルート: ワークスペース内の全.houjichaファイル
+      return this.getHoujichaFiles();
+    }
+
+    if (element.itemType === 'file' && element.filePath) {
+      // ファイル: その中のNamespaceとClaim
+      return this.getFileContents(element.filePath);
+    }
+
+    return [];
+  }
+
+  private async getHoujichaFiles(): Promise<HoujichaTreeItem[]> {
+    const files = await vscode.workspace.findFiles('**/*.{houjicha,hcha}');
+    return files.map(file => {
+      const relativePath = vscode.workspace.asRelativePath(file);
+      return new HoujichaTreeItem(
+        relativePath,
+        vscode.TreeItemCollapsibleState.Collapsed,
+        file.fsPath,
+        0,
+        'file'
+      );
+    });
+  }
+
+  private async getFileContents(filePath: string): Promise<HoujichaTreeItem[]> {
+    try {
+      const uri = vscode.Uri.file(filePath);
+      const document = await vscode.workspace.openTextDocument(uri);
+      const text = document.getText();
+      const { document: ast } = parse(text);
+
+      const items: HoujichaTreeItem[] = [];
+
+      for (const child of ast.children) {
+        if (child.type === 'Namespace') {
+          const nsItem = new HoujichaTreeItem(
+            `::${child.name}`,
+            vscode.TreeItemCollapsibleState.Expanded,
+            filePath,
+            child.range.start.line,
+            'namespace'
+          );
+          items.push(nsItem);
+
+          // Namespace内のClaim
+          for (const nsChild of child.children) {
+            if (nsChild.type === 'Claim') {
+              items.push(this.createClaimItem(nsChild, filePath));
+            }
+          }
+        } else if (child.type === 'Claim') {
+          items.push(this.createClaimItem(child, filePath));
+        }
+      }
+
+      return items;
+    } catch (error) {
+      return [new HoujichaTreeItem(
+        `エラー: ${error}`,
+        vscode.TreeItemCollapsibleState.None
+      )];
+    }
+  }
+
+  private createClaimItem(claim: any, filePath: string): HoujichaTreeItem {
+    // 充足状況を計算
+    let fulfilled = 0, total = 0;
+    for (const req of claim.requirements || []) {
+      total++;
+      if (req.concluded === 'positive' || req.fact) fulfilled++;
+    }
+    const summary = total > 0 ? ` [${fulfilled}/${total}]` : '';
+    const ref = claim.reference?.citation ? `（${claim.reference.citation}）` : '';
+
+    const item = new HoujichaTreeItem(
+      `#${claim.name}${ref}${summary}`,
+      vscode.TreeItemCollapsibleState.None,
+      filePath,
+      claim.range.start.line,
+      'claim'
+    );
+
+    // 説明テキスト
+    if (claim.effect) {
+      item.description = `>> ${claim.effect.content}`;
+    }
+
+    return item;
+  }
+}
 
 // インライン補完プロバイダー
 class HoujichaInlineCompletionProvider implements vscode.InlineCompletionItemProvider {
@@ -23,16 +174,38 @@ class HoujichaInlineCompletionProvider implements vscode.InlineCompletionItemPro
     context: vscode.InlineCompletionContext,
     token: vscode.CancellationToken
   ): Promise<vscode.InlineCompletionItem[] | vscode.InlineCompletionList | null> {
-    // LSPクライアントが起動していない場合は何もしない
+    const lineText = document.lineAt(position.line).text;
+    const textBeforeCursor = lineText.substring(0, position.character);
+
+    // 1. 記号ペアのGhost補完（優先）
+    // ~> (理由)
+    if (textBeforeCursor.endsWith('~')) {
+      return [new vscode.InlineCompletionItem('>', new vscode.Range(position, position))];
+    }
+    // => (帰結) - ただし既に => の場合は出さない
+    if (textBeforeCursor.endsWith('=') && !textBeforeCursor.endsWith('<=') && !textBeforeCursor.endsWith('=>')) {
+      return [new vscode.InlineCompletionItem('>', new vscode.Range(position, position))];
+    }
+    // <= (あてはめ)
+    if (textBeforeCursor.endsWith('<')) {
+      return [new vscode.InlineCompletionItem('=', new vscode.Range(position, position))];
+    }
+    // >> (効果)
+    if (textBeforeCursor.endsWith('>') && !textBeforeCursor.endsWith('>>')) {
+      return [new vscode.InlineCompletionItem('>', new vscode.Range(position, position))];
+    }
+    // :: (論述空間) - 行頭の場合のみ
+    if (textBeforeCursor.endsWith(':') && textBeforeCursor.trim() === ':') {
+      return [new vscode.InlineCompletionItem(':', new vscode.Range(position, position))];
+    }
+
+    // 2. LSPクライアントが起動していない場合は記号ペアのみ
     if (!client || client.state !== 2) { // State.Running = 2
       return null;
     }
 
-    const lineText = document.lineAt(position.line).text;
-    const textBeforeCursor = lineText.substring(0, position.character);
-
-    // 補完をトリガーする条件をチェック
-    const shouldTrigger =
+    // 3. LSP補完をトリガーする条件をチェック
+    const shouldTriggerLSP =
       textBeforeCursor.endsWith('*') ||
       textBeforeCursor.endsWith('＊') ||
       textBeforeCursor.endsWith('%') ||
@@ -41,7 +214,7 @@ class HoujichaInlineCompletionProvider implements vscode.InlineCompletionItemPro
       textBeforeCursor.endsWith('$') ||
       textBeforeCursor.endsWith('#');
 
-    if (!shouldTrigger) {
+    if (!shouldTriggerLSP) {
       return null;
     }
 
@@ -64,10 +237,10 @@ class HoujichaInlineCompletionProvider implements vscode.InlineCompletionItemPro
         } else if (item.insertText instanceof vscode.SnippetString) {
           return item.insertText.value;
         }
-        // insertTextがない場合はlabelを使うが、「」マーカーを除去
+        // insertTextがない場合はlabelを使う
         const label = typeof item.label === 'string' ? item.label : item.label.label;
-        // ✓や「」を除去してクリーンなテキストを返す
-        return label.replace(/^[✓ ]+/, '').replace(/^「/, '').replace(/」$/, '') + '」 <= ';
+        // ✓や⚠️を除去してクリーンなテキストを返す
+        return label.replace(/^[✓⚠️ ]+/, '');
       };
 
       // ✓マークが付いていない最初の候補を探す
@@ -153,6 +326,123 @@ export function activate(context: ExtensionContext) {
   );
 
   context.subscriptions.push(inlineProvider);
+
+  // プレビューコマンドを登録
+  let currentFormat: RenderFormat = 'structured';
+
+  const previewCommand = vscode.commands.registerCommand('houjicha.openPreview', () => {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor || editor.document.languageId !== 'houjicha') {
+      vscode.window.showWarningMessage('ほうじ茶ファイルを開いてください');
+      return;
+    }
+
+    // プレビューパネルを作成または再利用
+    if (previewPanel) {
+      previewPanel.reveal(vscode.ViewColumn.Two);
+    } else {
+      previewPanel = vscode.window.createWebviewPanel(
+        'houjichaPreview',
+        'ほうじ茶 プレビュー',
+        vscode.ViewColumn.Two,
+        {
+          enableScripts: true,
+          retainContextWhenHidden: true,
+        }
+      );
+
+      previewPanel.onDidDispose(() => {
+        previewPanel = undefined;
+      });
+
+      // フォーマット切り替えメッセージを受信
+      previewPanel.webview.onDidReceiveMessage((message) => {
+        if (message.command === 'switchFormat') {
+          currentFormat = message.format as RenderFormat;
+          updatePreview(editor.document);
+        }
+      });
+    }
+
+    updatePreview(editor.document);
+  });
+
+  // プレビューを更新
+  function updatePreview(document: vscode.TextDocument) {
+    if (!previewPanel) return;
+
+    try {
+      const text = document.getText();
+      const { document: ast, errors } = parse(text);
+
+      const content = renderToHtml(ast, { format: currentFormat });
+      previewPanel.webview.html = getPreviewHtml(content, currentFormat);
+    } catch (error) {
+      previewPanel.webview.html = `
+        <html>
+          <body>
+            <h1>エラー</h1>
+            <pre>${error}</pre>
+          </body>
+        </html>
+      `;
+    }
+  }
+
+  // ドキュメント変更時にプレビューを更新
+  const changeDisposable = vscode.workspace.onDidChangeTextDocument((e) => {
+    if (previewPanel && e.document.languageId === 'houjicha') {
+      updatePreview(e.document);
+    }
+  });
+
+  // アクティブエディタ変更時にプレビューを更新
+  const editorDisposable = vscode.window.onDidChangeActiveTextEditor((editor) => {
+    if (previewPanel && editor && editor.document.languageId === 'houjicha') {
+      updatePreview(editor.document);
+    }
+  });
+
+  context.subscriptions.push(previewCommand, changeDisposable, editorDisposable);
+
+  // TreeViewを登録
+  const treeProvider = new HoujichaTreeProvider();
+  const treeView = vscode.window.createTreeView('houjichaOutline', {
+    treeDataProvider: treeProvider,
+    showCollapseAll: true,
+  });
+
+  // ファイル変更時にツリーを更新
+  const treeRefreshDisposable = vscode.workspace.onDidSaveTextDocument((doc) => {
+    if (doc.languageId === 'houjicha') {
+      treeProvider.refresh();
+    }
+  });
+
+  // 新規ファイル作成/削除時にツリーを更新
+  const fileWatcher = vscode.workspace.createFileSystemWatcher('**/*.{houjicha,hcha}');
+  fileWatcher.onDidCreate(() => treeProvider.refresh());
+  fileWatcher.onDidDelete(() => treeProvider.refresh());
+
+  // ファイルの特定位置を開くコマンド
+  const openLocationCommand = vscode.commands.registerCommand(
+    'houjicha.openLocation',
+    async (filePath: string, line: number) => {
+      const uri = vscode.Uri.file(filePath);
+      const document = await vscode.workspace.openTextDocument(uri);
+      const editor = await vscode.window.showTextDocument(document);
+      const position = new vscode.Position(line, 0);
+      editor.selection = new vscode.Selection(position, position);
+      editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
+    }
+  );
+
+  // リフレッシュコマンド
+  const refreshCommand = vscode.commands.registerCommand('houjicha.refreshOutline', () => {
+    treeProvider.refresh();
+  });
+
+  context.subscriptions.push(treeView, treeRefreshDisposable, fileWatcher, openLocationCommand, refreshCommand);
 }
 
 export function deactivate(): Thenable<void> | undefined {

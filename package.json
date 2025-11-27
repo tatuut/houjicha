@@ -32,7 +32,56 @@
         "scopeName": "source.houjicha",
         "path": "./syntaxes/houjicha.tmLanguage.json"
       }
-    ]
+    ],
+    "commands": [
+      {
+        "command": "houjicha.openPreview",
+        "title": "ほうじ茶: プレビューを開く",
+        "icon": "$(open-preview)"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "when": "resourceLangId == houjicha",
+          "command": "houjicha.openPreview",
+          "group": "navigation"
+        }
+      ],
+      "commandPalette": [
+        {
+          "when": "resourceLangId == houjicha",
+          "command": "houjicha.openPreview"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "houjicha.openPreview",
+        "key": "ctrl+shift+v",
+        "mac": "cmd+shift+v",
+        "when": "resourceLangId == houjicha"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "houjicha-explorer",
+          "title": "ほうじ茶",
+          "icon": "$(law)"
+        }
+      ]
+    },
+    "views": {
+      "houjicha-explorer": [
+        {
+          "id": "houjichaOutline",
+          "name": "論証構造",
+          "icon": "$(list-tree)",
+          "contextualTitle": "ほうじ茶 論証構造"
+        }
+      ]
+    }
   },
   "scripts": {
     "build": "tsc",

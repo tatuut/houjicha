@@ -32,8 +32,6 @@ export enum TokenType {
   // 括弧類
   LPAREN = 'LPAREN',                 // ( または （
   RPAREN = 'RPAREN',                 // ) または ）
-  LBRACKET_JP = 'LBRACKET_JP',       // 「 (後方互換)
-  RBRACKET_JP = 'RBRACKET_JP',       // 」 (後方互換)
   ASTERISK = 'ASTERISK',             // * 要件マーカー
 
   // キーワード
@@ -286,14 +284,6 @@ export class Lexer {
         this.addToken(TokenType.RPAREN, char, startPos);
         break;
 
-      case '「':
-        this.addToken(TokenType.LBRACKET_JP, char, startPos);
-        break;
-
-      case '」':
-        this.addToken(TokenType.RBRACKET_JP, char, startPos);
-        break;
-
       case '*':
       case '＊':
         this.addToken(TokenType.ASTERISK, char, startPos);
@@ -401,7 +391,7 @@ export class Lexer {
       '#', '＃', '^', ':', '：', '<', '>', '?', '？',
       '%', '％', '@', '＠', '~', '=', '&', '＆', '|', '｜',
       '+', '＋', '!', '！', '(', '（', ')', '）',
-      '「', '」', '$', '＄', '/', '\\', ';', '；',
+      '$', '＄', '/', '\\', ';', '；',
       '*', '＊',  // 要件マーカー
       ' ', '\t', '\u3000'
     ];

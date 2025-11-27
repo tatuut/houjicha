@@ -79,7 +79,7 @@ export interface Evaluation extends BaseNode {
 }
 
 /**
- * 要件（「他人の財物」: %規範 <= 事実）
+ * 要件（*他人の財物: %規範 <= 事実）
  * - concluded: 結論（+該当/!否定/undefined未定）
  */
 export interface Requirement extends BaseNode {
