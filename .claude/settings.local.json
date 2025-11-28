@@ -12,7 +12,9 @@
       "Bash(code --install-extension:*)",
       "Bash(code --list-extensions)",
       "Bash(git push)",
-      "Bash(node:*)"
+      "Bash(node:*)",
+      "Bash(python tools/image_to_aa.py:*)",
+      "Bash(python:*)"
     ],
     "deny": [],
     "ask": []
