@@ -1,5 +1,5 @@
 /**
- * ほうじ茶（Houjicha）- MCP Server
+ * Chai - MCP Server
  * AIが法的推論を行うための入力補助ツール
  */
 
@@ -88,28 +88,28 @@ let workingDirectory = process.cwd();
 
 const tools: Tool[] = [
   {
-    name: 'houjicha_validate',
-    description: 'ほうじ茶コードを検証し、エラー・警告・ヒントを返します。Ghost補完の情報も含まれます。',
+    name: 'chai_validate',
+    description: 'Chaiコードを検証し、エラー・警告・ヒントを返します。Ghost補完の情報も含まれます。',
     inputSchema: {
       type: 'object',
       properties: {
         content: {
           type: 'string',
-          description: '検証する.houjichaコードの内容',
+          description: '検証する.chaiコードの内容',
         },
       },
       required: ['content'],
     },
   },
   {
-    name: 'houjicha_get_completions',
+    name: 'chai_get_completions',
     description: '指定位置での補完候補を取得します（Ctrl+Space相当）',
     inputSchema: {
       type: 'object',
       properties: {
         content: {
           type: 'string',
-          description: '.houjichaコードの内容',
+          description: '.chaiコードの内容',
         },
         line: {
           type: 'number',
@@ -124,14 +124,14 @@ const tools: Tool[] = [
     },
   },
   {
-    name: 'houjicha_apply_completion',
+    name: 'chai_apply_completion',
     description: '補完を適用して新しいコンテンツを返します',
     inputSchema: {
       type: 'object',
       properties: {
         content: {
           type: 'string',
-          description: '.houjichaコードの内容',
+          description: '.chaiコードの内容',
         },
         line: {
           type: 'number',
@@ -150,7 +150,7 @@ const tools: Tool[] = [
     },
   },
   {
-    name: 'houjicha_list_templates',
+    name: 'chai_list_templates',
     description: '利用可能な条文テンプレートの一覧を取得します',
     inputSchema: {
       type: 'object',
@@ -163,7 +163,7 @@ const tools: Tool[] = [
     },
   },
   {
-    name: 'houjicha_get_template',
+    name: 'chai_get_template',
     description: '条文テンプレートの詳細を取得します',
     inputSchema: {
       type: 'object',
@@ -177,7 +177,7 @@ const tools: Tool[] = [
     },
   },
   {
-    name: 'houjicha_search_templates',
+    name: 'chai_search_templates',
     description: 'キーワードで条文テンプレートを検索します',
     inputSchema: {
       type: 'object',
@@ -191,8 +191,8 @@ const tools: Tool[] = [
     },
   },
   {
-    name: 'houjicha_expand_template',
-    description: 'テンプレートを展開して.houjichaコードを生成します',
+    name: 'chai_expand_template',
+    description: 'テンプレートを展開して.chaiコードを生成します',
     inputSchema: {
       type: 'object',
       properties: {
@@ -214,7 +214,7 @@ const tools: Tool[] = [
     },
   },
   {
-    name: 'houjicha_register_template',
+    name: 'chai_register_template',
     description: '新しい条文テンプレートを登録します',
     inputSchema: {
       type: 'object',
@@ -253,7 +253,7 @@ const tools: Tool[] = [
     },
   },
   {
-    name: 'houjicha_add_to_template',
+    name: 'chai_add_to_template',
     description: '既存のテンプレートに要件や論点を追加します',
     inputSchema: {
       type: 'object',
@@ -269,7 +269,7 @@ const tools: Tool[] = [
     },
   },
   {
-    name: 'houjicha_list_snippets',
+    name: 'chai_list_snippets',
     description: 'カスタムスニペットの一覧を取得します',
     inputSchema: {
       type: 'object',
@@ -277,7 +277,7 @@ const tools: Tool[] = [
     },
   },
   {
-    name: 'houjicha_register_snippet',
+    name: 'chai_register_snippet',
     description: 'カスタムスニペットを登録します',
     inputSchema: {
       type: 'object',
@@ -291,7 +291,7 @@ const tools: Tool[] = [
     },
   },
   {
-    name: 'houjicha_set_working_directory',
+    name: 'chai_set_working_directory',
     description: '作業ディレクトリを設定し、条文データベースを読み込みます',
     inputSchema: {
       type: 'object',
@@ -841,7 +841,7 @@ function registerSnippet(snippet: SnippetInfo): { success: boolean; message?: st
 
 const server = new Server(
   {
-    name: 'houjicha-mcp',
+    name: 'chai-mcp',
     version: '0.1.0',
   },
   {
@@ -862,12 +862,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request: any) => {
 
   try {
     switch (name) {
-      case 'houjicha_validate': {
+      case 'chai_validate': {
         const result = validateContent(args.content as string);
         return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
       }
 
-      case 'houjicha_get_completions': {
+      case 'chai_get_completions': {
         const items = getCompletions(
           args.content as string,
           args.line as number,
@@ -876,7 +876,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request: any) => {
         return { content: [{ type: 'text', text: JSON.stringify({ items }, null, 2) }] };
       }
 
-      case 'houjicha_apply_completion': {
+      case 'chai_apply_completion': {
         const newContent = applyCompletion(
           args.content as string,
           args.line as number,
@@ -886,12 +886,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request: any) => {
         return { content: [{ type: 'text', text: JSON.stringify({ newContent }, null, 2) }] };
       }
 
-      case 'houjicha_list_templates': {
+      case 'chai_list_templates': {
         const templates = listTemplates(args.category as string | undefined);
         return { content: [{ type: 'text', text: JSON.stringify({ templates }, null, 2) }] };
       }
 
-      case 'houjicha_get_template': {
+      case 'chai_get_template': {
         const template = getTemplate(args.id as string);
         if (!template) {
           return { content: [{ type: 'text', text: JSON.stringify({ error: 'テンプレートが見つかりません' }) }] };
@@ -899,12 +899,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request: any) => {
         return { content: [{ type: 'text', text: JSON.stringify(template, null, 2) }] };
       }
 
-      case 'houjicha_search_templates': {
+      case 'chai_search_templates': {
         const results = searchTemplates(args.query as string);
         return { content: [{ type: 'text', text: JSON.stringify({ results }, null, 2) }] };
       }
 
-      case 'houjicha_expand_template': {
+      case 'chai_expand_template': {
         const content = expandTemplate(
           args.templateId as string,
           args.subject as string | undefined,
@@ -913,12 +913,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request: any) => {
         return { content: [{ type: 'text', text: JSON.stringify({ content }, null, 2) }] };
       }
 
-      case 'houjicha_register_template': {
+      case 'chai_register_template': {
         const result = registerTemplate(args);
         return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
       }
 
-      case 'houjicha_add_to_template': {
+      case 'chai_add_to_template': {
         const result = addToTemplate(
           args.templateId as string,
           args.type as 'requirement' | 'issue',
@@ -930,17 +930,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request: any) => {
         return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
       }
 
-      case 'houjicha_list_snippets': {
+      case 'chai_list_snippets': {
         const snippetList = listSnippets();
         return { content: [{ type: 'text', text: JSON.stringify({ snippets: snippetList }, null, 2) }] };
       }
 
-      case 'houjicha_register_snippet': {
+      case 'chai_register_snippet': {
         const result = registerSnippet(args as SnippetInfo);
         return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] };
       }
 
-      case 'houjicha_set_working_directory': {
+      case 'chai_set_working_directory': {
         const dirPath = args.path as string;
         if (!fs.existsSync(dirPath)) {
           return { content: [{ type: 'text', text: JSON.stringify({ success: false, message: 'ディレクトリが存在しません' }) }] };
@@ -980,7 +980,7 @@ async function main() {
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error('ほうじ茶 MCP サーバーを起動しました');
+  console.error('Chai MCP サーバーを起動しました');
 }
 
 main().catch(console.error);

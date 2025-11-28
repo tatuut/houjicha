@@ -1,5 +1,5 @@
 /**
- * ほうじ茶（Houjicha）- VS Code 拡張機能
+ * Chai - VS Code 拡張機能
  * Language Server クライアント + インライン補完 + プレビュー
  */
 
@@ -19,7 +19,7 @@ let client: LanguageClient;
 let previewPanel: vscode.WebviewPanel | undefined;
 
 // TreeViewのアイテム
-class HoujichaTreeItem extends vscode.TreeItem {
+class ChaiTreeItem extends vscode.TreeItem {
   constructor(
     public readonly label: string,
     public readonly collapsibleState: vscode.TreeItemCollapsibleState,
@@ -33,7 +33,7 @@ class HoujichaTreeItem extends vscode.TreeItem {
     // アイコンとコンテキスト設定
     if (itemType === 'file') {
       this.iconPath = new vscode.ThemeIcon('file');
-      this.contextValue = 'houjichaFile';
+      this.contextValue = 'chaiFile';
     } else if (itemType === 'namespace') {
       this.iconPath = new vscode.ThemeIcon('folder');
     } else if (itemType === 'claim') {
@@ -50,7 +50,7 @@ class HoujichaTreeItem extends vscode.TreeItem {
     // クリックでファイルを開く
     if (filePath && line !== undefined) {
       this.command = {
-        command: 'houjicha.openLocation',
+        command: 'chai.openLocation',
         title: 'Open',
         arguments: [filePath, line],
       };
@@ -59,22 +59,22 @@ class HoujichaTreeItem extends vscode.TreeItem {
 }
 
 // TreeDataProvider
-class HoujichaTreeProvider implements vscode.TreeDataProvider<HoujichaTreeItem> {
-  private _onDidChangeTreeData = new vscode.EventEmitter<HoujichaTreeItem | undefined>();
+class ChaiTreeProvider implements vscode.TreeDataProvider<ChaiTreeItem> {
+  private _onDidChangeTreeData = new vscode.EventEmitter<ChaiTreeItem | undefined>();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
 
   refresh(): void {
     this._onDidChangeTreeData.fire(undefined);
   }
 
-  getTreeItem(element: HoujichaTreeItem): vscode.TreeItem {
+  getTreeItem(element: ChaiTreeItem): vscode.TreeItem {
     return element;
   }
 
-  async getChildren(element?: HoujichaTreeItem): Promise<HoujichaTreeItem[]> {
+  async getChildren(element?: ChaiTreeItem): Promise<ChaiTreeItem[]> {
     if (!element) {
-      // ルート: ワークスペース内の全.houjichaファイル
-      return this.getHoujichaFiles();
+      // ルート: ワークスペース内の全.chaiファイル
+      return this.getChaiFiles();
     }
 
     if (element.itemType === 'file' && element.filePath) {
@@ -85,11 +85,11 @@ class HoujichaTreeProvider implements vscode.TreeDataProvider<HoujichaTreeItem> 
     return [];
   }
 
-  private async getHoujichaFiles(): Promise<HoujichaTreeItem[]> {
-    const files = await vscode.workspace.findFiles('**/*.{houjicha,hcha}');
+  private async getChaiFiles(): Promise<ChaiTreeItem[]> {
+    const files = await vscode.workspace.findFiles('**/*.chai');
     return files.map(file => {
       const relativePath = vscode.workspace.asRelativePath(file);
-      return new HoujichaTreeItem(
+      return new ChaiTreeItem(
         relativePath,
         vscode.TreeItemCollapsibleState.Collapsed,
         file.fsPath,
@@ -99,18 +99,18 @@ class HoujichaTreeProvider implements vscode.TreeDataProvider<HoujichaTreeItem> 
     });
   }
 
-  private async getFileContents(filePath: string): Promise<HoujichaTreeItem[]> {
+  private async getFileContents(filePath: string): Promise<ChaiTreeItem[]> {
     try {
       const uri = vscode.Uri.file(filePath);
       const document = await vscode.workspace.openTextDocument(uri);
       const text = document.getText();
       const { document: ast } = parse(text);
 
-      const items: HoujichaTreeItem[] = [];
+      const items: ChaiTreeItem[] = [];
 
       for (const child of ast.children) {
         if (child.type === 'Namespace') {
-          const nsItem = new HoujichaTreeItem(
+          const nsItem = new ChaiTreeItem(
             `::${child.name}`,
             vscode.TreeItemCollapsibleState.Expanded,
             filePath,
@@ -132,14 +132,14 @@ class HoujichaTreeProvider implements vscode.TreeDataProvider<HoujichaTreeItem> 
 
       return items;
     } catch (error) {
-      return [new HoujichaTreeItem(
+      return [new ChaiTreeItem(
         `エラー: ${error}`,
         vscode.TreeItemCollapsibleState.None
       )];
     }
   }
 
-  private createClaimItem(claim: any, filePath: string): HoujichaTreeItem {
+  private createClaimItem(claim: any, filePath: string): ChaiTreeItem {
     // 充足状況を計算
     let fulfilled = 0, total = 0;
     for (const req of claim.requirements || []) {
@@ -149,7 +149,7 @@ class HoujichaTreeProvider implements vscode.TreeDataProvider<HoujichaTreeItem> 
     const summary = total > 0 ? ` [${fulfilled}/${total}]` : '';
     const ref = claim.reference?.citation ? `（${claim.reference.citation}）` : '';
 
-    const item = new HoujichaTreeItem(
+    const item = new ChaiTreeItem(
       `#${claim.name}${ref}${summary}`,
       vscode.TreeItemCollapsibleState.None,
       filePath,
@@ -301,18 +301,18 @@ export function activate(context: ExtensionContext) {
   // クライアントオプション
   const clientOptions: LanguageClientOptions = {
     documentSelector: [
-      { scheme: 'file', language: 'houjicha' },
-      { scheme: 'untitled', language: 'houjicha' },
+      { scheme: 'file', language: 'chai' },
+      { scheme: 'untitled', language: 'chai' },
     ],
     synchronize: {
-      fileEvents: workspace.createFileSystemWatcher('**/*.{houjicha,hcha}'),
+      fileEvents: workspace.createFileSystemWatcher('**/*.chai'),
     },
   };
 
   // クライアントを作成して起動
   client = new LanguageClient(
-    'houjichaLanguageServer',
-    'ほうじ茶 Language Server',
+    'chaiLanguageServer',
+    'Chai Language Server',
     serverOptions,
     clientOptions
   );
@@ -321,7 +321,7 @@ export function activate(context: ExtensionContext) {
 
   // インライン補完プロバイダーを登録
   const inlineProvider = vscode.languages.registerInlineCompletionItemProvider(
-    { language: 'houjicha', scheme: 'file' },
+    { language: 'chai', scheme: 'file' },
     new HoujichaInlineCompletionProvider()
   );
 
@@ -330,10 +330,10 @@ export function activate(context: ExtensionContext) {
   // プレビューコマンドを登録
   let currentFormat: RenderFormat = 'structured';
 
-  const previewCommand = vscode.commands.registerCommand('houjicha.openPreview', () => {
+  const previewCommand = vscode.commands.registerCommand('chai.openPreview', () => {
     const editor = vscode.window.activeTextEditor;
-    if (!editor || editor.document.languageId !== 'houjicha') {
-      vscode.window.showWarningMessage('ほうじ茶ファイルを開いてください');
+    if (!editor || editor.document.languageId !== 'chai') {
+      vscode.window.showWarningMessage('Chaiファイルを開いてください');
       return;
     }
 
@@ -342,8 +342,8 @@ export function activate(context: ExtensionContext) {
       previewPanel.reveal(vscode.ViewColumn.Two);
     } else {
       previewPanel = vscode.window.createWebviewPanel(
-        'houjichaPreview',
-        'ほうじ茶 プレビュー',
+        'chaiPreview',
+        'Chai プレビュー',
         vscode.ViewColumn.Two,
         {
           enableScripts: true,
@@ -391,14 +391,14 @@ export function activate(context: ExtensionContext) {
 
   // ドキュメント変更時にプレビューを更新
   const changeDisposable = vscode.workspace.onDidChangeTextDocument((e) => {
-    if (previewPanel && e.document.languageId === 'houjicha') {
+    if (previewPanel && e.document.languageId === 'chai') {
       updatePreview(e.document);
     }
   });
 
   // アクティブエディタ変更時にプレビューを更新
   const editorDisposable = vscode.window.onDidChangeActiveTextEditor((editor) => {
-    if (previewPanel && editor && editor.document.languageId === 'houjicha') {
+    if (previewPanel && editor && editor.document.languageId === 'chai') {
       updatePreview(editor.document);
     }
   });
@@ -406,27 +406,27 @@ export function activate(context: ExtensionContext) {
   context.subscriptions.push(previewCommand, changeDisposable, editorDisposable);
 
   // TreeViewを登録
-  const treeProvider = new HoujichaTreeProvider();
-  const treeView = vscode.window.createTreeView('houjichaOutline', {
+  const treeProvider = new ChaiTreeProvider();
+  const treeView = vscode.window.createTreeView('chaiOutline', {
     treeDataProvider: treeProvider,
     showCollapseAll: true,
   });
 
   // ファイル変更時にツリーを更新
   const treeRefreshDisposable = vscode.workspace.onDidSaveTextDocument((doc) => {
-    if (doc.languageId === 'houjicha') {
+    if (doc.languageId === 'chai') {
       treeProvider.refresh();
     }
   });
 
   // 新規ファイル作成/削除時にツリーを更新
-  const fileWatcher = vscode.workspace.createFileSystemWatcher('**/*.{houjicha,hcha}');
+  const fileWatcher = vscode.workspace.createFileSystemWatcher('**/*.chai');
   fileWatcher.onDidCreate(() => treeProvider.refresh());
   fileWatcher.onDidDelete(() => treeProvider.refresh());
 
   // ファイルの特定位置を開くコマンド
   const openLocationCommand = vscode.commands.registerCommand(
-    'houjicha.openLocation',
+    'chai.openLocation',
     async (filePath: string, line: number) => {
       const uri = vscode.Uri.file(filePath);
       const document = await vscode.workspace.openTextDocument(uri);
@@ -438,15 +438,15 @@ export function activate(context: ExtensionContext) {
   );
 
   // リフレッシュコマンド
-  const refreshCommand = vscode.commands.registerCommand('houjicha.refreshOutline', () => {
+  const refreshCommand = vscode.commands.registerCommand('chai.refreshOutline', () => {
     treeProvider.refresh();
   });
 
   // 記号早見表コマンド
-  const symbolGuideCommand = vscode.commands.registerCommand('houjicha.showSymbolGuide', () => {
+  const symbolGuideCommand = vscode.commands.registerCommand('chai.showSymbolGuide', () => {
     const panel = vscode.window.createWebviewPanel(
-      'houjichaSymbolGuide',
-      'ほうじ茶 記号早見表',
+      'chaiSymbolGuide',
+      'Chai 記号早見表',
       vscode.ViewColumn.Beside,
       { enableScripts: false }
     );
@@ -457,7 +457,7 @@ export function activate(context: ExtensionContext) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ほうじ茶 記号早見表</title>
+    <title>Chai 記号早見表</title>
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -517,7 +517,7 @@ export function activate(context: ExtensionContext) {
     </style>
 </head>
 <body>
-    <h1>ほうじ茶 記号早見表</h1>
+    <h1>Chai 記号早見表</h1>
 
     <h2>基本構文</h2>
     <table>

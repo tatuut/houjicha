@@ -1,5 +1,5 @@
 /**
- * ほうじ茶（Houjicha）- レンダラー
+ * Chai - レンダラー
  * AST → HTML/Markdown 変換
  * 将来WYSIWYGエディタでも使用可能な設計
  */
@@ -43,7 +43,7 @@ export function renderToHtml(doc: Document, options: Partial<RenderOptions> = {}
  * 答案形式（論文調）でレンダリング
  */
 function renderEssayFormat(doc: Document, opts: RenderOptions): string {
-  let html = '<div class="houjicha-essay">\n';
+  let html = '<div class="chai-essay">\n';
   let sectionNum = 0;
 
   for (const child of doc.children) {
@@ -165,7 +165,7 @@ function renderRequirementEssay(req: Requirement, label: string, depth: number, 
  * 構造化リスト形式でレンダリング
  */
 function renderStructuredFormat(doc: Document, opts: RenderOptions): string {
-  let html = '<div class="houjicha-structured">\n';
+  let html = '<div class="chai-structured">\n';
 
   for (const child of doc.children) {
     if (child.type === 'Namespace') {
@@ -307,7 +307,7 @@ export function getPreviewHtml(content: string, format: RenderFormat): string {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ほうじ茶 プレビュー</title>
+  <title>Chai プレビュー</title>
   <style>
     :root {
       --bg-color: #ffffff;
@@ -403,24 +403,24 @@ export function getPreviewHtml(content: string, format: RenderFormat): string {
     }
 
     /* 答案形式用 */
-    .houjicha-essay {
+    .chai-essay {
       text-align: justify;
     }
 
-    .houjicha-essay h2 {
+    .chai-essay h2 {
       text-align: center;
       border-bottom: none;
     }
 
-    .houjicha-essay .norm {
+    .chai-essay .norm {
       text-indent: 1em;
     }
 
-    .houjicha-essay .fact {
+    .chai-essay .fact {
       text-indent: 1em;
     }
 
-    .houjicha-essay .req-conclusion {
+    .chai-essay .req-conclusion {
       text-indent: 1em;
     }
 

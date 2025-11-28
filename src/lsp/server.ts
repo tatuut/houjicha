@@ -1,5 +1,5 @@
 /**
- * ほうじ茶（Houjicha）- Language Server Protocol サーバー
+ * Chai - Language Server Protocol サーバー
  * 条文データベース連携、賢い補完、欠落警告対応版
  */
 
@@ -113,7 +113,7 @@ connection.onInitialize((params: InitializeParams): InitializeResult => {
         codeActionKinds: [CodeActionKind.QuickFix, CodeActionKind.Source],
       },
       executeCommandProvider: {
-        commands: ['houjicha.generateTemplate', 'houjicha.reloadArticles'],
+        commands: ['chai.generateTemplate', 'chai.reloadArticles'],
       },
     },
   };
@@ -121,17 +121,17 @@ connection.onInitialize((params: InitializeParams): InitializeResult => {
 
 // 初期化完了後
 connection.onInitialized(() => {
-  connection.console.log('ほうじ茶 LSP サーバー起動完了');
+  connection.console.log('Chai LSP サーバー起動完了');
 });
 
 // コマンド実行
 connection.onExecuteCommand(async (params: ExecuteCommandParams) => {
-  if (params.command === 'houjicha.reloadArticles') {
+  if (params.command === 'chai.reloadArticles') {
     if (workspaceRoot) {
       articleDatabase = loadArticleDatabase(workspaceRoot);
       connection.console.log(`条文データベース再読み込み: ${articleDatabase.articles.size}件`);
     }
-  } else if (params.command === 'houjicha.generateTemplate') {
+  } else if (params.command === 'chai.generateTemplate') {
     const [articleQuery, uri] = params.arguments || [];
     if (articleQuery && uri) {
       const article = findArticle(articleDatabase, articleQuery);
@@ -191,7 +191,7 @@ async function validateDocument(textDocument: TextDocument): Promise<void> {
       end: { line: error.range.end.line, character: error.range.end.column },
     },
     message: error.message,
-    source: 'ほうじ茶',
+    source: 'Chai',
   }));
 
   // 全角スペースの警告
@@ -220,7 +220,7 @@ function detectFullWidthSpaces(text: string): Diagnostic[] {
             end: { line: lineNum, character: col + 1 },
           },
           message: '全角スペースが使用されています。半角スペースに置き換えてください。',
-          source: 'ほうじ茶',
+          source: 'Chai',
           data: { type: 'fullWidthSpace' },
         });
       }
@@ -245,7 +245,7 @@ function validateSemantics(doc: Document): Diagnostic[] {
           end: { line: claim.range.end.line, character: claim.range.end.column },
         },
         message: '主張に要件または事実のあてはめがありません',
-        source: 'ほうじ茶',
+        source: 'Chai',
       });
     }
 
@@ -260,7 +260,7 @@ function validateSemantics(doc: Document): Diagnostic[] {
             end: { line: claim.range.end.line, character: claim.range.end.column },
           },
           message: '主張は該当(+)とされていますが、否定された要件(!)が含まれています',
-          source: 'ほうじ茶',
+          source: 'Chai',
         });
       }
     }
@@ -298,7 +298,7 @@ function validateSemantics(doc: Document): Diagnostic[] {
                 end: { line: claim.range.end.line, character: claim.range.end.column },
               },
               message: `「${reqName}」の検討が見つかりません`,
-              source: 'ほうじ茶',
+              source: 'Chai',
               data: { missingRequirement: reqName, articleId: article.id },
             });
           }
@@ -320,7 +320,7 @@ function validateSemantics(doc: Document): Diagnostic[] {
               end: { line: claim.range.end.line, character: claim.range.end.column },
             },
             message: `論点「${issue.問題}」の検討を推奨`,
-            source: 'ほうじ茶',
+            source: 'Chai',
           });
         }
       }

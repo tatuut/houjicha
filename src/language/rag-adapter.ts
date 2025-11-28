@@ -1,5 +1,5 @@
 /**
- * ほうじ茶（Houjicha）- RAGアダプターインターフェース
+ * Chai - RAGアダプターインターフェース
  *
  * ベクトルDBとの連携を抽象化するアダプター。
  * 実際のDB実装（Pinecone, Qdrant, ChromaDB等）は

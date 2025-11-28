@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "houjicha": {
+    "chai": {
       "command": "node",
       "args": ["dist/mcp/server.js"],
       "cwd": "."

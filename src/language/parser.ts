@@ -1,5 +1,5 @@
 /**
- * ほうじ茶（Houjicha）- 構文解析器（Parser）
+ * Chai - 構文解析器（Parser）
  */
 
 import {
