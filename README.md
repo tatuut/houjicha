@@ -302,7 +302,7 @@ AIが先読みして補完候補を提案し、人間がTabで承認する。
 [github.com](https://github.com) でアカウントを作成（無料）
 
 #### 2. Issueを作成する
-1. [Issues ページ](https://github.com/tatuut/houjicha/issues) を開く
+1. [Issues ページ](https://github.com/tatuut/chai/issues) を開く
 2. 右上の「**New issue**」ボタンをクリック
 3. タイトルと本文を書いて「**Submit new issue**」
 
@@ -363,7 +363,7 @@ AIが先読みして補完候補を提案し、人間がTabで承認する。
 方針がズレていると、せっかく書いたコードが無駄になってしまいます。
 
 ##### 2. リポジトリをForkする
-1. [houjicha のページ](https://github.com/tatuut/houjicha) を開く
+1. [houjicha のページ](https://github.com/tatuut/chai) を開く
 2. 右上の「**Fork**」ボタンをクリック
 3. 自分のアカウントにコピーが作られる
 
